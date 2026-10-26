@@ -271,6 +271,24 @@ main {
     font-size: 0.8125rem;
 }
 
+.copy-button {
+    justify-self: start;
+    min-height: 2.75rem;
+    padding: 0.625rem 1rem;
+    border: 1px solid var(--ink);
+    border-radius: 0.75rem;
+    background: var(--ink);
+    color: var(--surface);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 160ms ease;
+}
+
+.copy-button:hover {
+    background: #3a3a3a;
+}
+
 .url-status:empty {
     display: none;
 }
@@ -327,6 +345,69 @@ a:hover {
     margin-top: 1rem;
 }
 
+.url-list-message {
+    color: var(--muted);
+    font-size: 0.875rem;
+}
+
+.recent-url-items {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0;
+    list-style: none;
+}
+
+.recent-url-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 0.875rem;
+    background: var(--paper);
+}
+
+.recent-url-details {
+    display: grid;
+    min-width: 0;
+    gap: 0.25rem;
+}
+
+.recent-short-url,
+.recent-original-url {
+    overflow-wrap: anywhere;
+}
+
+.recent-original-url,
+.recent-click-count {
+    color: var(--muted);
+    font-size: 0.8125rem;
+}
+
+.delete-url-button {
+    min-height: 2.5rem;
+    padding: 0.5rem 0.875rem;
+    border: 1px solid var(--ink);
+    border-radius: 0.625rem;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 160ms ease, color 160ms ease;
+}
+
+.delete-url-button:hover:not(:disabled) {
+    background: var(--ink);
+    color: var(--surface);
+}
+
+.delete-url-button:disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
 ::selection {
     background: var(--ink);
     color: var(--surface);
@@ -359,6 +440,14 @@ a:hover {
 
     .url-form input[type="url"] {
         padding-inline: 0.5rem;
+    }
+
+    .recent-url-item {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .delete-url-button {
+        justify-self: start;
     }
 }
 

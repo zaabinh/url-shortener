@@ -21,3 +21,25 @@ export async function shortenUrl(originalUrl) {
     }
     return shortUrl.href;
 }
+
+export async function listUrls() {
+    const response = await fetch(`${API_BASE_URL}/api/urls`);
+    if (!response.ok) {
+        throw new Error(`Could not load URLs (HTTP ${response.status}).`);
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+        throw new Error('The URL list response must be a JSON array.');
+    }
+    return data;
+}
+
+export async function deleteUrl(shortCode) {
+    const response = await fetch(`${API_BASE_URL}/api/urls/${encodeURIComponent(shortCode)}`, {
+        method: 'DELETE',
+    });
+    if (!response.ok) {
+        throw new Error(`Could not delete URL (HTTP ${response.status}).`);
+    }
+}

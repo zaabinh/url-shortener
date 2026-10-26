@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { shortenUrl } from '../lib/api';
 
-export default function UrlForm() {
+export default function UrlForm({ onCreated }) {
     const [value, setValue] = useState('');
     const [mode, setMode] = useState('long');
     const [busy, setBusy] = useState(false);
@@ -18,6 +18,18 @@ export default function UrlForm() {
 
     function announce(message, error = false) {
         setStatus({ message, error });
+    }
+
+    async function copyShortUrl() {
+        const shortUrl = pair.current?.short;
+        if (!shortUrl || value !== shortUrl) return;
+
+        try {
+            await navigator.clipboard.writeText(shortUrl);
+            announce('Short URL copied to clipboard.');
+        } catch {
+            announce('Could not access clipboard. Select and copy the short URL from the field.', true);
+        }
     }
 
     async function switchUrl(requested) {
@@ -47,6 +59,7 @@ export default function UrlForm() {
             const short = pair.current?.original === original ? pair.current.short : await shortenUrl(original);
             pair.current = { original, short };
             setValue(short);
+            onCreated?.();
             announce('Short URL ready in the field. Click or stretch the button right to restore the original.');
         } catch {
             setMode('long');
@@ -171,6 +184,11 @@ export default function UrlForm() {
                 </div>
             </div>
             <p id="url-hint" className="url-hint">Pull the button left to shorten. Stretch it right to expand. Or click to switch.</p>
+            {mode === 'short' && pair.current?.short === value && (
+                <button className="copy-button" type="button" onClick={copyShortUrl}>
+                    Copy short URL
+                </button>
+            )}
             <p id="url-status" className="url-status" role="status" aria-live="polite" data-error={String(status.error)}>{status.message}</p>
         </form>
     );

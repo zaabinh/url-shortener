@@ -112,3 +112,35 @@ def remove_url(
             status_code=500,
             detail="Database error while deleting URL",
         ) from exc
+
+    # 4. REDIRECT: Chuyen huong URL rut gon
+@router.get("/{short_code}")
+def redirect_short_url(
+    short_code: str,
+    db: Session = Depends(get_db),
+):
+    try:
+        url = url_service.get_url_by_code(db, short_code)
+
+        if url is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Short URL not found",
+            )
+
+        url_service.increment_click_count(db, url)
+
+        return RedirectResponse(
+            url=url.original_url,
+            status_code=307,
+        )
+
+    except HTTPException:
+        raise
+
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Database error while redirecting URL",
+        ) from exc

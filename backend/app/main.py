@@ -1,17 +1,20 @@
+
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.config import settings
+from app.api.urls import router as urls_router
 
-app = FastAPI(title=settings.app_name)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_methods=["*"],
-    allow_headers=["*"],
+app = FastAPI(
+    title="URL Shortener API",
+    version="1.0.0",
 )
 
-@app.get("/api/health", tags=["health"])
-def health():
-    return {"status": "ok"}
+app.include_router(urls_router)
+
+
+@app.get("/api/health", tags=["Health"])
+def health_check():
+    return {
+        "status": "ok",
+        "service": "url-shortener-backend",
+    }

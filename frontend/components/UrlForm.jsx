@@ -3,10 +3,28 @@
 import { useRef, useState } from 'react';
 import { shortenUrl } from '../lib/api';
 
+function toLocalDateTimeInputValue(date) {
+    const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+    return localDate.toISOString().slice(0, 16);
+}
+
+function formatExpiration(dateTimeValue) {
+    const date = new Date(dateTimeValue);
+    return date.toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    });
+}
+
 export default function UrlForm({ onCreated }) {
     const [value, setValue] = useState('');
+    const [expiredAt, setExpiredAt] = useState('');
     const [mode, setMode] = useState('long');
     const [busy, setBusy] = useState(false);
+    const [copied, setCopied] = useState(false);
     const [status, setStatus] = useState({ message: '', error: false });
     const [dragWidth, setDragWidth] = useState(null);
     const formRef = useRef(null);
@@ -26,8 +44,10 @@ export default function UrlForm({ onCreated }) {
 
         try {
             await navigator.clipboard.writeText(shortUrl);
+            setCopied(true);
             announce('Short URL copied to clipboard.');
         } catch {
+            setCopied(false);
             announce('Could not access clipboard. Select and copy the short URL from the field.', true);
         }
     }
@@ -42,6 +62,7 @@ export default function UrlForm({ onCreated }) {
             }
             setValue(pair.current.original);
             setMode('long');
+            setCopied(false);
             announce('Original URL restored.');
             return;
         }
@@ -52,18 +73,27 @@ export default function UrlForm({ onCreated }) {
             announce('Enter a URL starting with https:// or http://.', true);
             return;
         }
+        const expirationDate = new Date(expiredAt);
+        if (!expiredAt || Number.isNaN(expirationDate.getTime()) || expirationDate.getTime() <= Date.now()) {
+            announce('Choose an expiration time in the future.', true);
+            return;
+        }
+        const expirationUtc = expirationDate.toISOString();
         setBusy(true);
         setMode('short');
         announce('Shortening your URL…');
         try {
-            const short = pair.current?.original === original ? pair.current.short : await shortenUrl(original);
-            pair.current = { original, short };
+            const short = await shortenUrl(original, expiredAt);
+            pair.current = { original, short, expiredAt: expirationUtc };
             setValue(short);
+            setCopied(false);
             onCreated?.();
-            announce('Short URL ready in the field. Click or stretch the button right to restore the original.');
-        } catch {
+            announce(`Short URL ready. Expires ${formatExpiration(expirationDate)}. Click or stretch the button right to restore the original.`);
+        } catch (error) {
             setMode('long');
-            announce('Could not shorten this URL. Check that the shortening service is running and try again.', true);
+            announce(error instanceof Error
+                ? error.message
+                : 'Could not shorten this URL. Check that the shortening service is running and try again.', true);
         } finally {
             setBusy(false);
         }
@@ -78,6 +108,7 @@ export default function UrlForm({ onCreated }) {
         const next = event.target.value;
         setValue(next);
         setMode(pair.current && next === pair.current.short ? 'short' : 'long');
+        setCopied(false);
         announce('');
     }
 
@@ -143,6 +174,9 @@ export default function UrlForm({ onCreated }) {
 
     const dragging = dragWidth !== null;
     const label = busy ? 'Shortening…' : mode === 'short' ? 'Expand it!' : 'Shorten it!';
+    const minimumExpiration = new Date();
+    minimumExpiration.setSeconds(0, 0);
+    minimumExpiration.setMinutes(minimumExpiration.getMinutes() + 1);
 
     return (
         <form ref={formRef} className="url-form" onSubmit={handleSubmit} aria-busy={busy || undefined}>
@@ -178,15 +212,36 @@ export default function UrlForm({ onCreated }) {
                         onLostPointerCapture={endDrag}
                         onClick={handleClick}
                     >
-                        <span className="toggle-grip" aria-hidden="true">&#8942;</span>
                         <span className="toggle-label">{label}</span>
                     </button>
                 </div>
             </div>
+            <label htmlFor="expired-at">Expiration date and time</label>
+            <input
+                className="expiration-input"
+                type="datetime-local"
+                name="expired_at"
+                id="expired-at"
+                lang="en"
+                required
+                min={toLocalDateTimeInputValue(minimumExpiration)}
+                aria-describedby="expiration-hint url-status"
+                value={expiredAt}
+                onChange={(event) => {
+                    setExpiredAt(event.target.value);
+                    announce('');
+                }}
+                disabled={busy}
+            />
+            <p id="expiration-hint" className="url-hint">Use your local time. The expiration is sent to the service in UTC.</p>
             <p id="url-hint" className="url-hint">Pull the button left to shorten. Stretch it right to expand. Or click to switch.</p>
             {mode === 'short' && pair.current?.short === value && (
-                <button className="copy-button" type="button" onClick={copyShortUrl}>
-                    Copy short URL
+                <button
+                    className={copied ? 'copy-button is-copied' : 'copy-button'}
+                    type="button"
+                    onClick={copyShortUrl}
+                >
+                    {copied ? '✓ Copied!' : 'Copy short URL'}
                 </button>
             )}
             <p id="url-status" className="url-status" role="status" aria-live="polite" data-error={String(status.error)}>{status.message}</p>

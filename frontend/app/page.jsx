@@ -9,6 +9,10 @@ export default function Home() {
 
     return (
         <>
+            <div className="brand-mark" aria-label="URL Shortener">
+                <span className="brand-icon" aria-hidden="true">↗</span>
+                <span>URL Shortener</span>
+            </div>
             <h1>Make your <span className="headline-url">URL</span> <span className="headline-shorter">shorter</span> <span className="headline-here">here<span className="headline-arrow" aria-hidden="true">↘</span></span></h1>
             <main>
                 <UrlForm onCreated={() => setRefreshKey((key) => key + 1)} />

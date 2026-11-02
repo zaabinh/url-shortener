@@ -24,7 +24,7 @@ jobs:
           NEXT_PUBLIC_USE_MOCK_API: 'false'
       - name: Install Playwright browser
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: ./node_modules/.bin/playwright install --with-deps chromium
       - name: Build Nginx frontend image
         working-directory: frontend
         run: docker build --tag url-shortener-frontend-e2e .
@@ -48,9 +48,19 @@ jobs:
           exit 1
       - name: Verify Nginx API and short-code proxying
         run: |
-          api_response=$(curl --fail --silent http://127.0.0.1:8080/api/probe)
+          for attempt in {1..30}; do
+            if api_response=$(curl --fail --silent --max-time 2 http://127.0.0.1:8080/api/probe); then
+              break
+            fi
+            sleep 1
+          done
+          if [ -z "${api_response:-}" ]; then
+            docker logs backend
+            docker logs url-shortener-frontend-e2e
+            exit 1
+          fi
           echo "$api_response" | grep -q '"path": "/api/probe"'
-          status=$(curl --silent --output /tmp/short-code-response.json --write-out '%{http_code}' http://127.0.0.1:8080/probe-code)
+          status=$(curl --silent --max-time 5 --output /tmp/short-code-response.json --write-out '%{http_code}' http://127.0.0.1:8080/probe-code)
           test "$status" = "410"
           grep -q '"detail": "expired"' /tmp/short-code-response.json
       - name: Run browser tests

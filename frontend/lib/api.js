@@ -7,7 +7,7 @@ const MOCK_STORAGE_KEY = 'url-shortener-demo-urls';
 // test UI
 function readMockUrls() {
     if (typeof window === 'undefined') {
-        throw new Error('Demo URL storage is only available in the browser.');
+        throw new TypeError('Demo URL storage is only available in the browser.');
     }
 
     const stored = window.localStorage.getItem(MOCK_STORAGE_KEY);
@@ -115,7 +115,7 @@ export async function shortenUrl(originalUrl, expirationValue) {
         throw new Error('The service returned an invalid response.');
     }
     if (typeof data?.short_url !== 'string') {
-        throw new Error('The service returned an invalid URL.');
+        throw new TypeError('The service returned an invalid URL.');
     }
 
     let shortUrl;

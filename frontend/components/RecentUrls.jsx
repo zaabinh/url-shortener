@@ -3,6 +3,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { deleteUrl, listUrls } from '../lib/api';
 
+function formatExpiration(expiredAt) {
+    const expiration = new Date(expiredAt);
+    if (Number.isNaN(expiration.getTime())) return 'an unknown time';
+    return expiration.toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    });
+}
+
 export default function RecentUrls({ refreshKey }) {
     const [urls, setUrls] = useState([]);
     const [now, setNow] = useState(() => Date.now());
@@ -69,18 +81,6 @@ export default function RecentUrls({ refreshKey }) {
         setExpiredNotice(`This short link has expired (HTTP 410 Gone). It expired ${formatExpiration(url.expired_at)}.`);
     }
 
-    function formatExpiration(expiredAt) {
-        const expiration = new Date(expiredAt);
-        if (Number.isNaN(expiration.getTime())) return 'an unknown time';
-        return expiration.toLocaleString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-        });
-    }
-
     return (
         <section className="url-list" aria-labelledby="recent-urls-heading">
             <h2 id="recent-urls-heading">Recent URLs</h2>
@@ -98,7 +98,7 @@ export default function RecentUrls({ refreshKey }) {
                 </div>
             )}
             {deleteError && <p className="url-list-message" role="alert">{deleteError}</p>}
-            {expiredNotice && <p className="url-list-message" role="status">{expiredNotice}</p>}
+            {expiredNotice && <output className="url-list-message">{expiredNotice}</output>}
             {!loading && !listError && urls.length === 0 && (
                 <p className="url-list-message">No shortened URLs yet.</p>
             )}
@@ -141,25 +141,27 @@ export default function RecentUrls({ refreshKey }) {
                                     )}
                                 </div>
                                 {confirmingCode === url.short_code ? (
-                                    <div className="delete-confirmation" role="group" aria-label="Confirm URL deletion">
-                                        <span>Are you sure?</span>
-                                        <button
-                                            className="delete-url-button confirm-yes"
-                                            type="button"
-                                            disabled={Boolean(deletingCode)}
-                                            onClick={() => confirmDelete(url.short_code)}
-                                        >
-                                            {deletingCode === url.short_code ? 'Deleting…' : 'Yes'}
-                                        </button>
-                                        <button
-                                            className="delete-url-button confirm-no"
-                                            type="button"
-                                            disabled={Boolean(deletingCode)}
-                                            onClick={() => setConfirmingCode('')}
-                                        >
-                                            No
-                                        </button>
-                                    </div>
+                                    <fieldset className="delete-confirmation">
+                                        <legend>Are you sure?</legend>
+                                        <div className="delete-confirmation-actions">
+                                            <button
+                                                className="delete-url-button confirm-yes"
+                                                type="button"
+                                                disabled={Boolean(deletingCode)}
+                                                onClick={() => confirmDelete(url.short_code)}
+                                            >
+                                                {deletingCode === url.short_code ? 'Deleting…' : 'Yes'}
+                                            </button>
+                                            <button
+                                                className="delete-url-button confirm-no"
+                                                type="button"
+                                                disabled={Boolean(deletingCode)}
+                                                onClick={() => setConfirmingCode('')}
+                                            >
+                                                No
+                                            </button>
+                                        </div>
+                                    </fieldset>
                                 ) : (
                                     <button
                                         className="delete-url-button"

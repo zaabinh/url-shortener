@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import URLModel
+from app.db.models import URL
 from app.schemas.url import URLCreate, URLResponse
 from app.core.config import settings
 from app.services.url_service import create_short_url
@@ -26,17 +26,11 @@ def create_url(payload: URLCreate, db: Session = Depends(get_db)):
 
 @router.get("", response_model=List[URLResponse])
 def list_urls(db: Session = Depends(get_db)):
-    """Lấy danh sách tất cả URL, tự động cập nhật trạng thái active = False nếu đã quá hạn."""
-    urls = db.query(URLModel).all()
-    now = datetime.now(timezone.utc)
+    """Lấy danh sách tất cả URL kèm theo short_url chuẩn."""
+    urls = db.query(URL).all()
 
     result = []
     for item in urls:
-        # Tự động đánh dấu active = False nếu đã hết hạn
-        if item.expired_at and item.expired_at <= now and item.active:
-            item.active = False
-            db.commit()
-
         data = URLResponse.model_validate(item)
         # Gán short_url chuẩn cho từng bản ghi trong danh sách
         data.short_url = f"{settings.BASE_URL}/{item.short_code}"
@@ -48,7 +42,7 @@ def list_urls(db: Session = Depends(get_db)):
 @router.delete("/{short_code}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_url(short_code: str, db: Session = Depends(get_db)):
     """Xóa URL theo short_code khớp với yêu cầu từ Frontend."""
-    db_url = db.query(URLModel).filter(URLModel.short_code == short_code).first()
+    db_url = db.query(URL).filter(URL.short_code == short_code).first()
     
     if not db_url:
         raise HTTPException(

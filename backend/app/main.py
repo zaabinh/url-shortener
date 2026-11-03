@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.db.database import get_db, engine, Base
-from app.db.models import URLModel
+from app.db.models import URL
 from app.api.urls import router as urls_router
 from app.core.config import settings
 
@@ -34,23 +34,20 @@ def health_check():
 # 3. Endpoint Redirect /{short_code}
 @app.get("/{short_code}")
 def redirect_to_url(short_code: str, db: Session = Depends(get_db)):
-    db_url = db.query(URLModel).filter(URLModel.short_code == short_code).first()
+    db_url = db.query(URL).filter(URL.short_code == short_code).first()
     
     if not db_url:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Short URL not found")
         
     now = datetime.now(timezone.utc)
     
-    # Kiểm tra hết hạn -> Trả về 410 Gone
-    if (not db_url.active) or (db_url.expired_at and db_url.expired_at <= now):
-        if db_url.active:
-            db_url.active = False
-            db.commit()
+    # Kiểm tra hết hạn -> Trả về 410 Gone (sử dụng expired_at theo đúng model thực tế)
+    if db_url.expired_at and db_url.expired_at <= now:
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="URL has expired")
         
     # Atomic update click_count tránh lost update khi truy cập đồng thời
-    db.query(URLModel).filter(URLModel.short_code == short_code, URLModel.active == True).update(
-        {"click_count": URLModel.click_count + 1}
+    db.query(URL).filter(URL.short_code == short_code).update(
+        {"click_count": URL.click_count + 1}
     )
     db.commit()
     

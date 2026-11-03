@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { deleteUrl, listUrls } from '../lib/api';
+import { deleteUrl, isMockApiEnabled, listUrls } from '../lib/api';
 
 function formatExpiration(expiredAt) {
     const expiration = new Date(expiredAt);
@@ -22,6 +22,7 @@ export default function RecentUrls({ refreshKey }) {
     const [loading, setLoading] = useState(true);
     const [listError, setListError] = useState('');
     const [deleteError, setDeleteError] = useState('');
+    const [failedDeleteCode, setFailedDeleteCode] = useState('');
     const [expiredNotice, setExpiredNotice] = useState('');
     const [deletingCode, setDeletingCode] = useState('');
     const [confirmingCode, setConfirmingCode] = useState('');
@@ -59,16 +60,18 @@ export default function RecentUrls({ refreshKey }) {
         deleteInProgress.current = true;
         setDeletingCode(shortCode);
         setDeleteError('');
+        setFailedDeleteCode('');
 
         try {
             await deleteUrl(shortCode);
             setUrls((current) => current.filter((url) => url.short_code !== shortCode));
+            setConfirmingCode('');
         } catch (requestError) {
             setDeleteError(requestError.message);
+            setFailedDeleteCode(shortCode);
         } finally {
             deleteInProgress.current = false;
             setDeletingCode('');
-            setConfirmingCode('');
         }
     }
 
@@ -84,6 +87,11 @@ export default function RecentUrls({ refreshKey }) {
     return (
         <section className="url-list" aria-labelledby="recent-urls-heading">
             <h2 id="recent-urls-heading">Recent URLs</h2>
+            {isMockApiEnabled && (
+                <p className="url-list-message" role="status">
+                    Demo mode: these URLs are sample data for interface testing only and will not redirect.
+                </p>
+            )}
             {loading && <p className="url-list-message">Loading URLs…</p>}
             {!loading && listError && (
                 <div className="url-list-error" role="alert">
@@ -97,7 +105,18 @@ export default function RecentUrls({ refreshKey }) {
                     </button>
                 </div>
             )}
-            {deleteError && <p className="url-list-message" role="alert">{deleteError}</p>}
+            {deleteError && (
+                <div className="url-list-error" role="alert">
+                    <p className="url-list-message">{deleteError}</p>
+                    <button
+                        className="delete-url-button retry-button"
+                        type="button"
+                        onClick={() => confirmDelete(failedDeleteCode)}
+                    >
+                        Retry delete
+                    </button>
+                </div>
+            )}
             {expiredNotice && <output className="url-list-message">{expiredNotice}</output>}
             {!loading && !listError && urls.length === 0 && (
                 <p className="url-list-message">No shortened URLs yet.</p>
@@ -115,8 +134,11 @@ export default function RecentUrls({ refreshKey }) {
                                 key={url.short_code}
                             >
                                 <div className="recent-url-details">
-                                    {isExpired ? (
-                                        <span className="recent-short-url is-expired-link" aria-disabled="true">
+                                    {isExpired || isMockApiEnabled ? (
+                                        <span
+                                            className={isExpired ? 'recent-short-url is-expired-link' : 'recent-short-url'}
+                                            aria-disabled="true"
+                                        >
                                             {url.short_url}
                                         </span>
                                     ) : (

@@ -145,6 +145,33 @@ test('deletes a recent short URL', async ({ page }) => {
     expect(requests.deletes).toEqual(['delete-me']);
 });
 
+test('keeps a URL after delete fails and allows retry', async ({ page }) => {
+    const url = makeUrl('delete-retry');
+    let deleteRequests = 0;
+    await page.route('**/api/urls**', async (route) => {
+        const request = route.request();
+        if (request.method() === 'GET') {
+            await route.fulfill({ json: [url] });
+            return;
+        }
+        deleteRequests += 1;
+        if (deleteRequests === 1) {
+            await route.fulfill({ status: 503, json: { detail: 'backend internals' } });
+            return;
+        }
+        await route.fulfill({ status: 204 });
+    });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Delete' }).click();
+    await page.getByRole('button', { name: 'Yes' }).click();
+
+    await expect(page.getByText(url.short_url, { exact: true })).toBeVisible();
+    await expect(page.locator('.url-list-error[role="alert"]')).toContainText('Could not delete URL (HTTP 503)');
+    await page.getByRole('button', { name: 'Retry delete' }).click();
+    await expect(page.getByText(url.short_url, { exact: true })).toHaveCount(0);
+    expect(deleteRequests).toBe(2);
+});
+
 test('creates a new mapping after its previous mapping was deleted', async ({ page }) => {
     const { requests } = await mockApi(page);
     await openForm(page);
@@ -173,22 +200,24 @@ test('marks expired links as HTTP 410 Gone and disables navigation', async ({ pa
     await expect(page.getByRole('link', { name: expiredUrl.short_url })).toHaveCount(0);
 });
 
-test('offers retry and hides old URL data when list loading fails', async ({ page }) => {
+test('offers retry after a list timeout and displays the refreshed data', async ({ page }) => {
     let listRequests = 0;
+    const recoveredUrl = makeUrl('recovered');
     await page.route('**/api/urls', async (route) => {
         listRequests += 1;
         if (listRequests === 1) {
-            await route.fulfill({ status: 503, json: { detail: 'backend internals' } });
+            await route.abort('timedout');
             return;
         }
-        await route.fulfill({ json: [] });
+        await route.fulfill({ json: [recoveredUrl] });
     });
     await page.goto('/');
 
     await expect(page.locator('.url-list-error')).toContainText('Could not load URLs');
     await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
     await page.getByRole('button', { name: 'Retry' }).click();
-    await expect(page.getByText('No shortened URLs yet.')).toBeVisible();
+    await expect(page.getByText(recoveredUrl.short_url, { exact: true })).toBeVisible();
+    await expect(page.getByText(recoveredUrl.original_url, { exact: true })).toBeVisible();
     expect(listRequests).toBe(2);
 });
 
@@ -205,13 +234,91 @@ test('rejects a non-array list response with a TypeError', async () => {
         globalThis.fetch = async () => new Response(JSON.stringify({ urls: [] }), {
             headers: { 'Content-Type': 'application/json' },
         });
-
         await assert.rejects(api.listUrls(), {
             name: 'TypeError',
             message: 'The URL list response must be a JSON array.',
         });
     } finally {
         globalThis.fetch = originalFetch;
+        if (previousMockSetting === undefined) {
+            delete process.env.NEXT_PUBLIC_USE_MOCK_API;
+        } else {
+            process.env.NEXT_PUBLIC_USE_MOCK_API = previousMockSetting;
+        }
+        if (previousApiBaseUrl === undefined) {
+            delete process.env.NEXT_PUBLIC_API_BASE_URL;
+        } else {
+            process.env.NEXT_PUBLIC_API_BASE_URL = previousApiBaseUrl;
+        }
+    }
+});
+
+test('maps list and delete timeout errors to retryable messages', async () => {
+    const previousMockSetting = process.env.NEXT_PUBLIC_USE_MOCK_API;
+    const previousApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    const originalFetch = globalThis.fetch;
+    process.env.NEXT_PUBLIC_USE_MOCK_API = 'false';
+    process.env.NEXT_PUBLIC_API_BASE_URL = '';
+
+    try {
+        const source = await readFile(path.resolve(process.cwd(), 'lib/api.js'), 'utf8');
+        const api = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+        const timeout = new DOMException('Timed out', 'TimeoutError');
+        globalThis.fetch = async () => {
+            throw timeout;
+        };
+
+        await assert.rejects(api.listUrls(), {
+            name: 'Error',
+            message: 'The request to load URLs timed out. Please try again.',
+        });
+        await assert.rejects(api.deleteUrl('retry-me'), {
+            name: 'Error',
+            message: 'The request to delete this URL timed out. Please try again.',
+        });
+    } finally {
+        globalThis.fetch = originalFetch;
+        if (previousMockSetting === undefined) {
+            delete process.env.NEXT_PUBLIC_USE_MOCK_API;
+        } else {
+            process.env.NEXT_PUBLIC_USE_MOCK_API = previousMockSetting;
+        }
+        if (previousApiBaseUrl === undefined) {
+            delete process.env.NEXT_PUBLIC_API_BASE_URL;
+        } else {
+            process.env.NEXT_PUBLIC_API_BASE_URL = previousApiBaseUrl;
+        }
+    }
+});
+
+test('disables mock mode in production even when the mock flag is enabled', async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousMockSetting = process.env.NEXT_PUBLIC_USE_MOCK_API;
+    const previousApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    const originalFetch = globalThis.fetch;
+    process.env.NODE_ENV = 'production';
+    process.env.NEXT_PUBLIC_USE_MOCK_API = 'true';
+    process.env.NEXT_PUBLIC_API_BASE_URL = '';
+
+    try {
+        const source = await readFile(path.resolve(process.cwd(), 'lib/api.js'), 'utf8');
+        const api = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}#production`);
+        let requested = false;
+        globalThis.fetch = async () => {
+            requested = true;
+            return new Response('[]', { headers: { 'Content-Type': 'application/json' } });
+        };
+
+        expect(api.isMockApiEnabled).toBe(false);
+        await expect(api.listUrls()).resolves.toEqual([]);
+        expect(requested).toBe(true);
+    } finally {
+        globalThis.fetch = originalFetch;
+        if (previousNodeEnv === undefined) {
+            delete process.env.NODE_ENV;
+        } else {
+            process.env.NODE_ENV = previousNodeEnv;
+        }
         if (previousMockSetting === undefined) {
             delete process.env.NEXT_PUBLIC_USE_MOCK_API;
         } else {

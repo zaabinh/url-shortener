@@ -1,7 +1,11 @@
 // Empty in production builds: the API is served on the same origin through Nginx.
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
-const USE_MOCK_API = process.env.NEXT_PUBLIC_USE_MOCK_API === 'true';
+const USE_MOCK_API = process.env.NODE_ENV !== 'production'
+    && process.env.NEXT_PUBLIC_USE_MOCK_API === 'true';
 const MOCK_STORAGE_KEY = 'url-shortener-demo-urls';
+const REQUEST_TIMEOUT_MS = 15_000;
+
+export const isMockApiEnabled = USE_MOCK_API;
 
 
 // test UI
@@ -67,6 +71,14 @@ function getShortenRequestError(error) {
     return new Error('Could not reach the shortening service. Check your connection and try again.');
 }
 
+function getRequestError(action, error) {
+    const subject = action === 'load' ? 'load URLs' : 'delete this URL';
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+        return new Error(`The request to ${subject} timed out. Please try again.`);
+    }
+    return new Error(`Could not ${subject} because the service could not be reached. Check your connection and try again.`);
+}
+
 function shortenUrlWithMock(originalUrl, expiredAt) {
     const urls = readMockUrls();
     let shortCode;
@@ -98,7 +110,7 @@ export async function shortenUrl(originalUrl, expirationValue) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ original_url: originalUrl, expired_at: expiredAt }),
-            signal: AbortSignal.timeout(15000),
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
     } catch (error) {
         throw getShortenRequestError(error);
@@ -133,7 +145,14 @@ export async function shortenUrl(originalUrl, expirationValue) {
 export async function listUrls() {
     if (USE_MOCK_API) return readMockUrls();
 
-    const response = await fetch(`${API_BASE_URL}/api/urls`);
+    let response;
+    try {
+        response = await fetch(`${API_BASE_URL}/api/urls`, {
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+    } catch (error) {
+        throw getRequestError('load', error);
+    }
     if (!response.ok) {
         throw new Error(`Could not load URLs (HTTP ${response.status}).`);
     }
@@ -152,9 +171,15 @@ export async function deleteUrl(shortCode) {
         return;
     }
 
-    const response = await fetch(`${API_BASE_URL}/api/urls/${encodeURIComponent(shortCode)}`, {
-        method: 'DELETE',
-    });
+    let response;
+    try {
+        response = await fetch(`${API_BASE_URL}/api/urls/${encodeURIComponent(shortCode)}`, {
+            method: 'DELETE',
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+    } catch (error) {
+        throw getRequestError('delete', error);
+    }
     if (!response.ok) {
         throw new Error(`Could not delete URL (HTTP ${response.status}).`);
     }

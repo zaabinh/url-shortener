@@ -36,7 +36,7 @@ Target Docker architecture:
 Browser :8080
     |
     v
-Frontend (Nginx :80)
+Frontend (unprivileged Nginx :8080)
     | Next.js static export (built in a multi-stage image)
     | /api/* and /{short_code} proxied to backend:8000
     v
@@ -190,7 +190,7 @@ On macOS/Linux, activate the backend environment with `source .venv/bin/activate
 
 The current health endpoint checks that FastAPI responds; it does not test database or Redis connectivity.
 
-Shortening is expected to fail at this phase because the URL endpoints are not implemented. Docker startup commands are intentionally deferred: `compose.yaml`, Dockerfiles, and `nginx.conf` are placeholders.
+Shortening is expected to fail at this phase because the URL endpoints are not implemented. The frontend image serves the static export through unprivileged Nginx, but full-stack Docker startup remains deferred because `compose.yaml` has no services and the backend has no URL endpoints.
 
 ## Configuration
 
@@ -219,6 +219,8 @@ python -m pytest -q
 ```
 
 Current expected result: **1 passed**. `test_health.py` checks the health response through FastAPI's test client; `test_urls.py` is still empty. The health test requires no PostgreSQL or Redis service. Stop development servers with `Ctrl+C` when finished.
+
+Frontend browser tests live in `frontend/tests/e2e/` and run with `npm ci --ignore-scripts`, `npx playwright install chromium`, `npm run build`, and `npm run test:e2e`. The GitHub Actions workflow builds and serves the static frontend through the unprivileged Nginx image before running Playwright. Browser tests stub `/api/urls`; a separate disposable backend probe verifies that Nginx forwards `/api/*` and `/{short_code}` and preserves HTTP 410 responses. These checks do not exercise PostgreSQL. The backend currently exposes only `/api/health`, and `compose.yaml` has no services, so database-backed URL creation/list/delete/redirect E2E tests must wait for those backend endpoints and Compose services.
 
 ## Database design
 

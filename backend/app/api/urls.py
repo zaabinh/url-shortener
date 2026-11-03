@@ -1,146 +1,61 @@
-
-from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import RedirectResponse
-from sqlalchemy.exc import SQLAlchemyError
+from datetime import datetime, timezone
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
+from app.db.models import URLModel
 from app.schemas.url import URLCreate, URLResponse
-from app.services import url_service
+from app.core.config import settings
+from app.services.url_service import create_short_url
+
+router = APIRouter(prefix="/api/urls", tags=["urls"])
 
 
-router = APIRouter(tags=["URLs"])
+@router.post("", response_model=URLResponse, status_code=status.HTTP_201_CREATED)
+def create_url(payload: URLCreate, db: Session = Depends(get_db)):
+    """Tạo mới một URL rút gọn và trả về short_url hoàn chỉnh."""
+    db_url = create_short_url(db, payload, settings.BASE_URL)
+    
+    # Chuyển đổi sang schema response và gán đầy đủ short_url
+    response_data = URLResponse.model_validate(db_url)
+    response_data.short_url = f"{settings.BASE_URL}/{db_url.short_code}"
+    
+    return response_data
 
 
-# 1. CREATE: Tao URL rut gon
-@router.post(
-    "/api/urls",
-    response_model=URLResponse,
-    status_code=201,
-)
-def create_short_url(
-    data: URLCreate,
-    db: Session = Depends(get_db),
-):
-    try:
-        url = url_service.create_url(
-            db,
-            str(data.original_url),
+@router.get("", response_model=List[URLResponse])
+def list_urls(db: Session = Depends(get_db)):
+    """Lấy danh sách tất cả URL, tự động cập nhật trạng thái active = False nếu đã quá hạn."""
+    urls = db.query(URLModel).all()
+    now = datetime.now(timezone.utc)
+
+    result = []
+    for item in urls:
+        # Tự động đánh dấu active = False nếu đã hết hạn
+        if item.expired_at and item.expired_at <= now and item.active:
+            item.active = False
+            db.commit()
+
+        data = URLResponse.model_validate(item)
+        # Gán short_url chuẩn cho từng bản ghi trong danh sách
+        data.short_url = f"{settings.BASE_URL}/{item.short_code}"
+        result.append(data)
+
+    return result
+
+
+@router.delete("/{short_code}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_url(short_code: str, db: Session = Depends(get_db)):
+    """Xóa URL theo short_code khớp với yêu cầu từ Frontend."""
+    db_url = db.query(URLModel).filter(URLModel.short_code == short_code).first()
+    
+    if not db_url:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="URL not found"
         )
 
-        return URLResponse(
-            id=url.id,
-            original_url=url.original_url,
-            short_code=url.short_code,
-            short_url=url_service.build_short_url(url.short_code),
-            click_count=url.click_count,
-            created_at=url.created_at,
-        )
-
-    except RuntimeError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail="Cannot create short URL",
-        ) from exc
-
-    except SQLAlchemyError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail="Database error while creating URL",
-        ) from exc
-
-
-# 2. READ: Lay danh sach URL
-@router.get(
-    "/api/urls",
-    response_model=list[URLResponse],
-)
-def list_urls(
-    db: Session = Depends(get_db),
-):
-    try:
-        urls = url_service.get_urls(db)
-
-        return [
-            URLResponse(
-                id=url.id,
-                original_url=url.original_url,
-                short_code=url.short_code,
-                short_url=url_service.build_short_url(url.short_code),
-                click_count=url.click_count,
-                created_at=url.created_at,
-            )
-            for url in urls
-        ]
-
-    except SQLAlchemyError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail="Database error while listing URLs",
-        ) from exc
-
-
-# 3. DELETE: Xoa URL theo ID
-@router.delete(
-    "/api/urls/{url_id}",
-    status_code=204,
-)
-def remove_url(
-    url_id: int,
-    db: Session = Depends(get_db),
-):
-    try:
-        deleted = url_service.delete_url(db, url_id)
-
-        if not deleted:
-            raise HTTPException(
-                status_code=404,
-                detail="URL not found",
-            )
-
-        return Response(status_code=204)
-
-    except HTTPException:
-        raise
-
-    except SQLAlchemyError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail="Database error while deleting URL",
-        ) from exc
-
-    # 4. REDIRECT: Chuyen huong URL rut gon
-@router.get("/{short_code}")
-def redirect_short_url(
-    short_code: str,
-    db: Session = Depends(get_db),
-):
-    try:
-        url = url_service.get_url_by_code(db, short_code)
-
-        if url is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Short URL not found",
-            )
-
-        url_service.increment_click_count(db, url)
-
-        return RedirectResponse(
-            url=url.original_url,
-            status_code=307,
-        )
-
-    except HTTPException:
-        raise
-
-    except SQLAlchemyError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail="Database error while redirecting URL",
-        ) from exc
+    db.delete(db_url)
+    db.commit()
+    return None

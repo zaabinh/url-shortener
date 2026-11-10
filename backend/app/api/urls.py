@@ -1,51 +1,55 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from fastapi.responses import RedirectResponse
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.db.database import get_db
-from app.schemas.url import UrlCreate, UrlResponse
-from app.services import url_service
+from app.db.models import URL
+from app.schemas.url import URLCreate, URLResponse
+from app.core.config import settings
+from app.services.url_service import create_short_url
 
 router = APIRouter(prefix="/api/urls", tags=["urls"])
-redirect_router = APIRouter(tags=["redirect"])
 
-def _as_utc(dt: datetime) -> datetime:
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
 
-def _to_response(url) -> UrlResponse:
-    return UrlResponse(
-        short_code=url.short_code,
-        short_url=settings.short_url(url.short_code),
-        original_url=url.original_url,
-        click_count=url.click_count,
-        created_at=_as_utc(url.created_at) if hasattr(url, "created_at") and url.created_at else datetime.now(timezone.utc),
-        expired_at=_as_utc(url.expired_at),
-    )
+@router.post("", response_model=URLResponse, status_code=status.HTTP_201_CREATED)
+def create_url(payload: URLCreate, db: Session = Depends(get_db)):
+    """Tạo mới một URL rút gọn và trả về short_url hoàn chỉnh."""
+    db_url = create_short_url(db, payload, settings.BASE_URL)
+    
+    # Chuyển đổi sang schema response và gán đầy đủ short_url
+    response_data = URLResponse.model_validate(db_url)
+    response_data.short_url = f"{settings.BASE_URL}/{db_url.short_code}"
+    
+    return response_data
 
-@router.post("", response_model=UrlResponse, status_code=status.HTTP_201_CREATED)
-def create_url(payload: UrlCreate, db: Session = Depends(get_db)):
-    url = url_service.create_url(db, str(payload.original_url), payload.expired_at)
-    return _to_response(url)
 
-@router.get("", response_model=list[UrlResponse])
-def list_urls(limit: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db)):
-    return [_to_response(u) for u in url_service.list_urls(db, limit)]
+@router.get("", response_model=List[URLResponse])
+def list_urls(db: Session = Depends(get_db)):
+    """Lấy danh sách tất cả URL kèm theo short_url chuẩn."""
+    urls = db.query(URL).all()
+
+    result = []
+    for item in urls:
+        data = URLResponse.model_validate(item)
+        # Gán short_url chuẩn cho từng bản ghi trong danh sách
+        data.short_url = f"{settings.BASE_URL}/{item.short_code}"
+        result.append(data)
+
+    return result
+
 
 @router.delete("/{short_code}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_url(short_code: str, db: Session = Depends(get_db)):
-    if not url_service.delete_url(db, short_code):
-        raise HTTPException(status_code=404, detail="URL not found")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    """Xóa URL theo short_code khớp với yêu cầu từ Frontend."""
+    db_url = db.query(URL).filter(URL.short_code == short_code).first()
+    
+    if not db_url:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="URL not found"
+        )
 
-@redirect_router.get("/{short_code}")
-def redirect_to_original(short_code: str, db: Session = Depends(get_db)):
-    destination_url, status_code = url_service.resolve_short_code(db, short_code)
-    if status_code == 404:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Short URL not found")
-    if status_code == 410:
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Short URL has expired")
-    return RedirectResponse(destination_url, status_code=status.HTTP_302_FOUND)
+    db.delete(db_url)
+    db.commit()
+    return None

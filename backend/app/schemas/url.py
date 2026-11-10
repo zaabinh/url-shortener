@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from pydantic import BaseModel, HttpUrl, field_validator
+from pydantic import BaseModel, HttpUrl, field_validator, ConfigDict
 
 MAX_URL_LENGTH = 2048
 
@@ -26,10 +26,14 @@ class UrlCreate(BaseModel):
             return value.astimezone(timezone.utc)
         return value
 
-class UrlResponse(BaseModel):
+class URLResponse(BaseModel):
+    id: int
+    original_url: str
     short_code: str
     short_url: str
-    original_url: str
     click_count: int
     created_at: datetime
     expired_at: datetime
+    active: bool = True
+      
+    model_config = ConfigDict(from_attributes=True)

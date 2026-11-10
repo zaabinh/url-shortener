@@ -1,43 +1,27 @@
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.core.config import settings
 
-engine = create_engine(settings.DATABASE_URL)
+if not settings.database_url:
+    raise RuntimeError("DATABASE_URL is not set. Please configure it in .env")
 
+is_sqlite = settings.database_url.startswith("sqlite")
 
-with engine.connect() as connection:
-    print(
-        "DATABASE:",
-        connection.exec_driver_sql(
-            "SELECT current_database(), current_schema()"
-        ).fetchone(),
-    )
-
-    print(
-        "URL COUNT:",
-        connection.exec_driver_sql(
-            "SELECT COUNT(*) FROM public.urls"
-        ).scalar(),
-    )
-    print(
-        "URL DATA:",
-        connection.exec_driver_sql(
-            "SELECT id, original_url, short_code FROM public.urls ORDER BY id"
-        ).fetchall(),
-    )
-
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine,
+engine = create_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    connect_args={"check_same_thread": False} if is_sqlite else {"connect_timeout": 5},
 )
 
-Base = declarative_base()
+SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
+class Base(DeclarativeBase):
+    pass
 
 def get_db():
+    """FastAPI dependency: cung cấp 1 db session cho mỗi request và đóng lại sau khi hoàn thành."""
     db = SessionLocal()
     try:
         yield db

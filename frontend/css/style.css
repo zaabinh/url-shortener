@@ -21,12 +21,12 @@
 body {
     min-height: 100vh;
     min-height: 100svh;
-    padding: clamp(3rem, 8vw, 7rem) clamp(1.25rem, 5vw, 4rem);
     position: relative;
     isolation: isolate;
     overflow-wrap: anywhere;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    padding: 0;
 }
 
 /* Oversized concentric contours remain behind the page content. */
@@ -167,13 +167,7 @@ body::after {
 }
 
 .hero-title::before {
-    content: "";
-    display: block;
-    width: 3rem;
-    height: 0.5rem;
-    margin-bottom: 1.5rem;
-    background: var(--accent);
-    border-radius: 1rem;
+    display: none;
 }
 
 .form-panel {
@@ -363,9 +357,11 @@ a:hover {
 }
 
 .url-list {
-    margin-top: 2.25rem;
-    padding-top: 1.5rem;
     border-top: 1px solid var(--line);
+    max-width: 70rem;
+    scroll-margin-top: 1rem;
+    margin: 0 auto;
+    padding: 2rem clamp(1rem, 4vw, 3rem) 6rem;
 }
 
 .url-list-header > h2 {
@@ -575,18 +571,10 @@ a:hover {
 }
 
 @media (max-width: 560px) {
-    body {
-        padding: 2rem 1rem 3rem;
-    }
-
     .hero-title {
         margin-bottom: 1rem;
         font-size: clamp(2.1rem, 9vw, 3rem);
         line-height: 1.15;
-    }
-
-    .hero-title::before {
-        margin-bottom: 1rem;
     }
 
     .url-form {
@@ -623,21 +611,8 @@ a:hover {
     }
 }
 
-@media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-        transition: none !important;
-        animation: none !important;
-    }
-}
-
 html {
     scroll-behavior: smooth;
-}
-
-body {
-    padding: 0;
 }
 
 .site-main {
@@ -680,10 +655,6 @@ body {
     line-height: 1.12;
 }
 
-.hero-title::before {
-    display: none;
-}
-
 .hero .form-panel {
     min-width: 0;
     width: 100%;
@@ -709,13 +680,6 @@ body {
     color: var(--accent);
     font-weight: 600;
     text-decoration: none;
-}
-
-.url-list {
-    max-width: 70rem;
-    margin: 0 auto;
-    padding: 2rem clamp(1rem, 4vw, 3rem) 4rem;
-    scroll-margin-top: 1rem;
 }
 
 .url-list-header {
@@ -822,10 +786,6 @@ body {
     background: var(--accent-hover);
 }
 
-.url-list {
-    padding-bottom: 6rem;
-}
-
 @media (max-width: 760px) {
     .hero {
         gap: 1rem;
@@ -842,6 +802,13 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        transition: none !important;
+        animation: none !important;
+    }
+
     html {
         scroll-behavior: auto;
     }

@@ -22,7 +22,7 @@ Run CREATE DATABASE separately, outside a transaction. These are example local c
 ```powershell
 cd backend
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
 Copy-Item .env.example .env
 ```
 
@@ -99,7 +99,7 @@ Browser tests intercept API requests. Build with a same-origin API; Playwright s
 
 ```powershell
 cd frontend
-npx playwright install chromium
+npm exec --no -- playwright install chromium
 node -e "const r=require('node:child_process').spawnSync(process.execPath,['node_modules/next/dist/bin/next','build'],{stdio:'inherit',env:{...process.env,NEXT_PUBLIC_API_BASE_URL:''}});process.exit(r.status??1)"
 npm run test:e2e
 ```
@@ -107,3 +107,16 @@ npm run test:e2e
 On macOS/Linux use .venv/bin/python and `NEXT_PUBLIC_API_BASE_URL='' npm run build`.
 
 See [database design](docs/DATABASE_DESIGN.md) and [backend fixes](docs/BACKEND_FIXES.md). The archive/docker-seminar branch preserves the guide and configuration for the next seminar stages; this local milestone runs without Docker.
+
+## Updating dependency locks
+
+Python direct dependencies are pinned in backend/requirements.in and backend/requirements-dev.in. Generated .txt files lock all resolved dependencies with SHA256 hashes, including platform-specific packages. CI installs wheels only and verifies hashes. Runtime dependencies stay aligned between both locks.
+
+After deliberately updating an input version, regenerate both locks from the repository root with uv 0.13.6:
+
+```powershell
+uv pip compile backend/requirements.in --universal --python-version 3.12 --generate-hashes --output-file backend/requirements.txt
+uv pip compile backend/requirements-dev.in --constraint backend/requirements.txt --universal --python-version 3.12 --generate-hashes --output-file backend/requirements-dev.txt
+```
+
+Commit the input and generated lock changes together, then run tests. Frontend versions and integrity hashes are tracked in frontend/package-lock.json; npm ci installs that lock. CI invokes the installed Playwright binary directly, so a missing package fails instead of triggering an npx download. Chromium's revision is selected by that locked Playwright version; Linux system libraries installed by --with-deps still follow the runner's OS repositories.

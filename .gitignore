@@ -8,6 +8,9 @@ venv/
 
 # Environment
 .env
+.env.*
+!.env.example
+!.env.*.example
 
 # Editors / OS
 .idea/

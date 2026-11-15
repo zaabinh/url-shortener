@@ -6,12 +6,12 @@ logger = logging.getLogger(__name__)
 
 _client = (
     redis.Redis.from_url(
-        settings.redis_url,
+        settings.REDIS_URL,
         decode_responses=True,
         socket_connect_timeout=1,
         socket_timeout=1,
     )
-    if settings.redis_url
+    if settings.REDIS_URL
     else None
 )
 
@@ -24,7 +24,7 @@ def get_cached_url(short_code: str) -> str | None:
     try:
         val = _client.get(_key(short_code))
     except redis.RedisError as exc:
-        logger.warning("[REDIS] Unavailable (%s), falling back to PostgreSQL", exc)
+        logger.warning("[REDIS] Unavailable (%s), falling back to PostgreSQL", type(exc).__name__)
         return None
 
     if val is None:
@@ -43,7 +43,7 @@ def cache_url(short_code: str, original_url: str, ttl_seconds: int | None = None
         _client.set(_key(short_code), original_url, ex=ttl)
         logger.info("[REDIS] Cached: %s (TTL %ss)", short_code, ttl)
     except redis.RedisError as exc:
-        logger.warning("[REDIS] Could not cache %s (%s)", short_code, exc)
+        logger.warning("[REDIS] Could not cache %s (%s)", short_code, type(exc).__name__)
 
 def delete_cached_url(short_code: str) -> None:
     """Cache invalidation khi URL bị xóa hoặc hết hạn."""
@@ -53,4 +53,4 @@ def delete_cached_url(short_code: str) -> None:
         _client.delete(_key(short_code))
         logger.info("[REDIS] Invalidated: %s", short_code)
     except redis.RedisError as exc:
-        logger.warning("[REDIS] Could not invalidate %s (%s)", short_code, exc)
+        logger.warning("[REDIS] Could not invalidate %s (%s)", short_code, type(exc).__name__)

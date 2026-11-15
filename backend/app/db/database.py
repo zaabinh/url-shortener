@@ -4,13 +4,13 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.core.config import settings
 
-if not settings.database_url:
+if not settings.DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set. Please configure it in .env")
 
-is_sqlite = settings.database_url.startswith("sqlite")
+is_sqlite = settings.DATABASE_URL.startswith("sqlite")
 
 engine = create_engine(
-    settings.database_url,
+    settings.DATABASE_URL,
     pool_pre_ping=True,
     connect_args={"check_same_thread": False} if is_sqlite else {"connect_timeout": 5},
 )
@@ -25,5 +25,8 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()

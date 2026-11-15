@@ -1,13 +1,14 @@
 
-from sqlalchemy import Column, DateTime, Integer, String, func
+from sqlalchemy import Column, DateTime, Integer, String, func, UUID
 
 from app.db.database import Base
+import uuid
 
 
-class URL(Base):
+class Url(Base):
     __tablename__ = "urls"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     original_url = Column(
         String(2048),
@@ -30,10 +31,10 @@ class URL(Base):
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
-        nullable=False,
+        nullable=True,
     )
 
-    expired_at = Column(
+    expires_at = Column(
         DateTime(timezone=True),
         nullable=False,
     )

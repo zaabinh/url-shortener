@@ -8,10 +8,10 @@ const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:8080';
 function makeUrl(shortCode, overrides = {}) {
     return {
         short_code: shortCode,
-        short_url: `${BASE_URL}/${shortCode}`,
+        short_url: `${BASE_URL}/api/urls/${shortCode}`,
         original_url: 'https://example.com/long-link',
         click_count: 0,
-        expired_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
         ...overrides,
     };
 }
@@ -37,7 +37,10 @@ async function mockApi(page, initialUrls = []) {
 
         if (method === 'GET' && pathname === '/api/urls') {
             requests.lists += 1;
-            await route.fulfill({ json: urls });
+            const query = new URL(request.url()).searchParams;
+            const offset = Number(query.get('offset') ?? 0);
+            const limit = Number(query.get('limit') ?? 20);
+            await route.fulfill({ json: urls.slice(offset, offset + limit) });
             return;
         }
 
@@ -45,12 +48,12 @@ async function mockApi(page, initialUrls = []) {
             const body = request.postDataJSON();
             requests.creates.push(body);
             const created = makeUrl(`code${requests.creates.length}`, {
-                short_url: `${new URL(request.url()).origin}/code${requests.creates.length}`,
+                short_url: `${new URL(request.url()).origin}/api/urls/code${requests.creates.length}`,
                 original_url: body.original_url,
-                expired_at: body.expired_at,
+                expires_at: body.expires_at,
             });
             urls.unshift(created);
-            await route.fulfill({ status: 201, json: { short_url: created.short_url } });
+            await route.fulfill({ status: 201, json: created });
             return;
         }
 
@@ -81,14 +84,14 @@ test('creates a short URL and sends expiration in UTC', async ({ page }) => {
 
     await page.getByRole('button', { name: 'Shorten it!' }).click();
 
-    await expect(page.getByText(`${BASE_URL}/code1`)).toBeVisible();
+    await expect(page.getByText(`${BASE_URL}/api/urls/code1`)).toBeVisible();
     const expectedExpiration = await page.evaluate((value) => new Date(value).toISOString(), expirationValue);
     expect(requests.creates).toHaveLength(1);
     expect(requests.creates[0]).toEqual({
         original_url: 'https://example.com/long-link',
-        expired_at: expectedExpiration,
+        expires_at: expectedExpiration,
     });
-    expect(requests.creates[0].expired_at).toMatch(/Z$/);
+    expect(requests.creates[0].expires_at).toMatch(/Z$/);
 });
 
 test('does not send an invalid URL', async ({ page }) => {
@@ -104,7 +107,7 @@ test('does not send an invalid URL', async ({ page }) => {
 
 test('shows a safe validation error when creation fails', async ({ page }) => {
     const requests = [];
-    await page.route('**/api/urls', async (route) => {
+    await page.route('**/api/urls**', async (route) => {
         if (route.request().method() === 'GET') {
             await route.fulfill({ json: [] });
             return;
@@ -131,17 +134,17 @@ test('refreshes the recent URL list after a successful create', async ({ page })
     await page.getByRole('button', { name: 'Shorten it!' }).click();
 
     await expect.poll(() => requests.lists).toBe(2);
-    await expect(page.getByText(`${BASE_URL}/code1`)).toBeVisible();
+    await expect(page.getByText(`${BASE_URL}/api/urls/code1`)).toBeVisible();
 });
 
 test('deletes a recent short URL', async ({ page }) => {
     const { requests } = await mockApi(page, [makeUrl('delete-me')]);
     await page.goto('/');
-    await expect(page.getByText(`${BASE_URL}/delete-me`)).toBeVisible();
+    await expect(page.getByText(`${BASE_URL}/api/urls/delete-me`)).toBeVisible();
     await page.getByRole('button', { name: 'Delete' }).click();
     await page.getByRole('button', { name: 'Yes' }).click();
 
-    await expect(page.getByText(`${BASE_URL}/delete-me`)).toHaveCount(0);
+    await expect(page.getByText(`${BASE_URL}/api/urls/delete-me`)).toHaveCount(0);
     expect(requests.deletes).toEqual(['delete-me']);
 });
 
@@ -151,7 +154,7 @@ test('keeps a URL after delete fails and allows retry', async ({ page }) => {
     await page.route('**/api/urls**', async (route) => {
         const request = route.request();
         if (request.method() === 'GET') {
-            await route.fulfill({ json: [url] });
+            await route.fulfill({ json: deleteRequests >= 2 ? [] : [url] });
             return;
         }
         deleteRequests += 1;
@@ -172,26 +175,35 @@ test('keeps a URL after delete fails and allows retry', async ({ page }) => {
     expect(deleteRequests).toBe(2);
 });
 
-test('creates a new mapping after its previous mapping was deleted', async ({ page }) => {
+test('requires reset before creating another mapping', async ({ page }) => {
     const { requests } = await mockApi(page);
     await openForm(page);
     await page.getByRole('button', { name: 'Shorten it!' }).click();
-    await expect(page.getByText(`${BASE_URL}/code1`)).toBeVisible();
+    await expect(page.getByText(`${BASE_URL}/api/urls/code1`)).toBeVisible();
 
     await page.getByRole('button', { name: 'Delete' }).click();
     await page.getByRole('button', { name: 'Yes' }).click();
-    await expect(page.getByText(`${BASE_URL}/code1`)).toHaveCount(0);
+    await expect(page.getByText(`${BASE_URL}/api/urls/code1`)).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Expand it!' }).click();
     await page.getByRole('button', { name: 'Shorten it!' }).click();
-    await expect(page.getByText(`${BASE_URL}/code2`)).toBeVisible();
+    await expect(page.getByLabel('Paste your URL')).toHaveValue(`${BASE_URL}/api/urls/code1`);
+    expect(requests.creates).toHaveLength(1);
+
+    await page.getByRole('button', { name: 'Reset', exact: true }).click();
+    await expect(page.getByLabel('Paste your URL')).toHaveValue('');
+    await expect(page.locator('#expired-at')).toHaveValue('');
+    await page.getByLabel('Paste your URL').fill('https://example.com/another');
+    await setFutureExpiration(page);
+    await page.getByRole('button', { name: 'Shorten it!' }).click();
+    await expect(page.getByText(`${BASE_URL}/api/urls/code2`)).toBeVisible();
 
     expect(requests.creates).toHaveLength(2);
     expect(requests.deletes).toEqual(['code1']);
 });
 
 test('marks expired links as HTTP 410 Gone and disables navigation', async ({ page }) => {
-    const expiredUrl = makeUrl('expired', { expired_at: '2020-01-01T00:00:00.000Z' });
+    const expiredUrl = makeUrl('expired', { expires_at: '2020-01-01T00:00:00.000Z' });
     await mockApi(page, [expiredUrl]);
     await page.goto('/');
 
@@ -203,7 +215,7 @@ test('marks expired links as HTTP 410 Gone and disables navigation', async ({ pa
 test('offers retry after a list timeout and displays the refreshed data', async ({ page }) => {
     let listRequests = 0;
     const recoveredUrl = makeUrl('recovered');
-    await page.route('**/api/urls', async (route) => {
+    await page.route('**/api/urls**', async (route) => {
         listRequests += 1;
         if (listRequests === 1) {
             await route.abort('timedout');
@@ -275,4 +287,33 @@ test('maps list and delete timeout errors to retryable messages', async () => {
             process.env.NEXT_PUBLIC_API_BASE_URL = previousApiBaseUrl;
         }
     }
+});
+
+test('refreshes cards and exposes Go and Back to top navigation', async ({ page }) => {
+    const { requests, urls } = await mockApi(page, [makeUrl('visit')]);
+    await page.goto('/');
+    await expect(page.getByRole('link', { name: 'Go to https://example.com/long-link' })).toHaveAttribute('href', `${BASE_URL}/api/urls/visit`);
+    await expect(page.getByRole('link', { name: 'Back to top' })).toHaveCount(0);
+    urls.push(makeUrl('refreshed'));
+    await page.locator('.refresh-button').click();
+    await expect(page.getByText(`${BASE_URL}/api/urls/refreshed`)).toBeVisible();
+    expect(requests.lists).toBeGreaterThanOrEqual(2);
+    await page.getByRole('link', { name: 'Recent URLs', exact: true }).click();
+    const back = page.getByRole('link', { name: 'Back to top' });
+    await expect(back).toBeVisible();
+    expect(await back.evaluate(el => getComputedStyle(el).position)).toBe('fixed');
+    await back.click();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    await expect(back).toHaveCount(0);
+});
+
+test('paginates recent URLs without dropping older records', async ({ page }) => {
+    await mockApi(page, Array.from({length:25}, (_,i) => makeUrl('page' + i)));
+    await page.goto('/');
+    await expect(page.locator('.recent-url-item')).toHaveCount(20);
+    await page.getByRole('button',{name:'Next',exact:true}).click();
+    await expect(page.locator('.recent-url-item')).toHaveCount(5);
+    await expect(page.getByText('Page 2', {exact:true})).toBeVisible();
+    await page.getByRole('button',{name:'Previous',exact:true}).click();
+    await expect(page.locator('.recent-url-item')).toHaveCount(20);
 });

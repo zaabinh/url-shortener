@@ -1,6 +1,17 @@
-// Empty in production builds: the API is served on the same origin through Nginx.
+// An empty base URL sends API requests to the page's origin.
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 const REQUEST_TIMEOUT_MS = 15_000;
+export function getShortUrl(shortCode) {
+    if (typeof shortCode !== 'string' || !shortCode.trim()) {
+        throw new TypeError('The service returned an invalid short code.');
+    }
+    const base = API_BASE_URL || window.location.origin;
+    const url = new URL(`${base.replace(/\/$/, '')}/api/urls/${encodeURIComponent(shortCode)}`);
+    if (!['http:', 'https:'].includes(url.protocol)) {
+        throw new TypeError('The service returned an invalid URL.');
+    }
+    return url.href;
+}
 
 function normalizeExpiration(expiredAt) {
     if (typeof expiredAt !== 'string' || expiredAt.trim() === '') {
@@ -45,16 +56,17 @@ function getRequestError(action, error) {
     return new Error(`Could not ${subject} because the service could not be reached. Check your connection and try again.`);
 }
 
-// The backend accepts { original_url, expired_at } and returns { short_url }.
+// The backend returns the short code; redirect URLs use the same API origin.
 export async function shortenUrl(originalUrl, expirationValue) {
     const expiredAt = normalizeExpiration(expirationValue);
+    const headers = { 'Content-Type': 'application/json' };
 
     let response;
     try {
         response = await fetch(`${API_BASE_URL}/api/urls`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ original_url: originalUrl, expired_at: expiredAt }),
+            headers,
+            body: JSON.stringify({ original_url: originalUrl, expires_at: expiredAt }),
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
     } catch (error) {
@@ -72,23 +84,14 @@ export async function shortenUrl(originalUrl, expirationValue) {
         throw new Error('The service returned an invalid response.');
     }
 
-    let shortUrl;
-    try {
-        shortUrl = new URL(`${API_BASE_URL}/${data.short_code}`);
-    } catch {
-        throw new Error('The service returned an invalid URL.');
-    }
-    if (!['http:', 'https:'].includes(shortUrl.protocol)) {
-        throw new Error('The service returned an invalid URL.');
-    }
-    return shortUrl.href;
+    return getShortUrl(data?.short_code);
 }
 
-export async function listUrls() {
+export async function listUrls({ limit = 20, offset = 0 } = {}) {
 
     let response;
     try {
-        response = await fetch(`${API_BASE_URL}/api/urls`, {
+        response = await fetch(`${API_BASE_URL}/api/urls?limit=${limit}&offset=${offset}`, {
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
     } catch (error) {
@@ -102,7 +105,7 @@ export async function listUrls() {
     if (!Array.isArray(data)) {
         throw new TypeError('The URL list response must be a JSON array.');
     }
-    return data;
+    return data.map((url) => ({ ...url, short_url: getShortUrl(url.short_code) }));
 }
 
 export async function deleteUrl(shortCode) {

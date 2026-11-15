@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { deleteUrl, listUrls } from '../lib/api';
 
+const PAGE_SIZE = 20;
+
 function formatExpiration(expiredAt) {
     const expiration = new Date(expiredAt);
     if (Number.isNaN(expiration.getTime())) return 'an unknown time';
@@ -17,6 +19,8 @@ function formatExpiration(expiredAt) {
 
 export default function RecentUrls({ refreshKey }) {
     const [urls, setUrls] = useState([]);
+    const [offset, setOffset] = useState(0);
+    const [hasNextPage, setHasNextPage] = useState(false);
     const [now, setNow] = useState(() => Date.now());
     const [retryKey, setRetryKey] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -27,6 +31,8 @@ export default function RecentUrls({ refreshKey }) {
     const [deletingCode, setDeletingCode] = useState('');
     const [confirmingCode, setConfirmingCode] = useState('');
     const deleteInProgress = useRef(false);
+
+    useEffect(() => setOffset(0), [refreshKey]);
 
     useEffect(() => {
         const timer = window.setInterval(() => setNow(Date.now()), 30_000);
@@ -39,9 +45,15 @@ export default function RecentUrls({ refreshKey }) {
         setListError('');
         setExpiredNotice('');
 
-        listUrls()
+        listUrls({ limit: PAGE_SIZE + 1, offset })
             .then((items) => {
-                if (active) setUrls(items);
+                if (!active) return;
+                if (items.length === 0 && offset > 0) {
+                    setOffset((current) => Math.max(0, current - PAGE_SIZE));
+                    return;
+                }
+                setUrls(items.slice(0, PAGE_SIZE));
+                setHasNextPage(items.length > PAGE_SIZE);
             })
             .catch((requestError) => {
                 if (active) setListError(requestError.message);
@@ -53,7 +65,7 @@ export default function RecentUrls({ refreshKey }) {
         return () => {
             active = false;
         };
-    }, [refreshKey, retryKey]);
+    }, [refreshKey, retryKey, offset]);
 
     async function confirmDelete(shortCode) {
         if (deleteInProgress.current) return;
@@ -66,6 +78,7 @@ export default function RecentUrls({ refreshKey }) {
             await deleteUrl(shortCode);
             setUrls((current) => current.filter((url) => url.short_code !== shortCode));
             setConfirmingCode('');
+            setRetryKey((current) => current + 1);
         } catch (requestError) {
             setDeleteError(requestError.message);
             setFailedDeleteCode(shortCode);
@@ -76,17 +89,27 @@ export default function RecentUrls({ refreshKey }) {
     }
 
     function handleShortUrlClick(event, url) {
-        const expiration = Date.parse(url.expired_at);
+        const expiration = Date.parse(url.expires_at);
         if (Number.isNaN(expiration) || expiration > Date.now()) return;
 
         event.preventDefault();
         setNow(Date.now());
-        setExpiredNotice(`This short link has expired (HTTP 410 Gone). It expired ${formatExpiration(url.expired_at)}.`);
+        setExpiredNotice(`This short link has expired (HTTP 410 Gone). It expired ${formatExpiration(url.expires_at)}.`);
     }
 
     return (
-        <section className="url-list" aria-labelledby="recent-urls-heading">
-            <h2 id="recent-urls-heading">Recent URLs</h2>
+        <section className="url-list" aria-labelledby="recent-urls-heading" id='recent-urls'>
+            <div className="url-list-header">
+                <h2 id="recent-urls-heading">Recent URLs</h2>
+                <button
+                    type='button'
+                    className='refresh-button'
+                    disabled={loading||Boolean(deletingCode)}
+                    onClick={() => setRetryKey((key) => key + 1)}
+                >
+                    {loading ? 'Refreshing...' : "Refresh"}
+                </button>
+            </div>
             {loading && <p className="url-list-message">Loading URLs…</p>}
             {!loading && listError && (
                 <div className="url-list-error" role="alert">
@@ -119,7 +142,7 @@ export default function RecentUrls({ refreshKey }) {
             {!loading && !listError && urls.length > 0 && (
                 <ul className="recent-url-items">
                     {urls.map((url) => {
-                        const expiration = Date.parse(url.expired_at);
+                        const expiration = Date.parse(url.expires_at);
                         const hasExpiration = !Number.isNaN(expiration);
                         const isExpired = hasExpiration && expiration <= now;
 
@@ -151,12 +174,20 @@ export default function RecentUrls({ refreshKey }) {
                                     </span>
                                     {hasExpiration ? (
                                         <span className={isExpired ? 'recent-expiration is-expired' : 'recent-expiration'}>
-                                            {isExpired ? 'Expired (HTTP 410 Gone)' : 'Expires'}: {formatExpiration(url.expired_at)}
+                                            {isExpired ? 'Expired (HTTP 410 Gone)' : 'Expires'}: {formatExpiration(url.expires_at)}
                                         </span>
                                     ) : (
                                         <span className="recent-expiration">Expiration unavailable</span>
                                     )}
                                 </div>
+                                <div className="recent-url-actions">
+                                    {isExpired ? (
+                                        <button className="go-button" type="button" disabled>Go</button>
+                                    ) : (
+                                        <a className="go-button" href={url.short_url} target="_blank" rel="noopener noreferrer" onClick={(event) => handleShortUrlClick(event, url)} aria-label={`Go to ${url.original_url}`}>
+                                            Go <span aria-hidden="true">↗</span>
+                                        </a>
+                                    )}
                                 {confirmingCode === url.short_code ? (
                                     <fieldset className="delete-confirmation">
                                         <legend>Are you sure?</legend>
@@ -189,10 +220,22 @@ export default function RecentUrls({ refreshKey }) {
                                         Delete
                                     </button>
                                 )}
+                                </div>
                             </li>
                         );
                     })}
                 </ul>
+            )}
+            {!loading && !listError && (offset > 0 || hasNextPage) && (
+                <nav className="url-pagination" aria-label="Recent URL pages">
+                    <button className="refresh-button" type="button" disabled={offset === 0 || Boolean(deletingCode)} onClick={() => setOffset((current) => Math.max(0, current - PAGE_SIZE))}>
+                        Previous
+                    </button>
+                    <span>Page {offset / PAGE_SIZE + 1}</span>
+                    <button className="refresh-button" type="button" disabled={!hasNextPage || Boolean(deletingCode)} onClick={() => setOffset((current) => current + PAGE_SIZE)}>
+                        Next
+                    </button>
+                </nav>
             )}
         </section>
     );

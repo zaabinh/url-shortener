@@ -38,6 +38,21 @@ export default function UrlForm({ onCreated }) {
         setStatus({ message, error });
     }
 
+    function resetForm(event) {
+        event.preventDefault();
+        if (busy) return;
+        pair.current = null;
+        drag.current = null;
+        suppressClick.current = false;
+        setValue('');
+        setExpiredAt('');
+        setMode('long');
+        setCopied(false);
+        setDragWidth(null);
+        announce('Form reset. Enter a new URL.');
+        formRef.current.querySelector('#url').focus();
+    }
+
     async function copyShortUrl() {
         const shortUrl = pair.current?.short;
         if (!shortUrl || value !== shortUrl) return;
@@ -55,18 +70,14 @@ export default function UrlForm({ onCreated }) {
     async function switchUrl(requested) {
         if (busy) return;
         const target = requested ?? (mode === 'short' ? 'long' : 'short');
-        if (target === 'long') {
-            if (!pair.current || value !== pair.current.short) {
-                announce('Shorten a URL here first to restore its original.', true);
-                return;
-            }
-            setValue(pair.current.original);
-            setMode('long');
+        if (pair.current) {
+            setValue(target === 'short' ? pair.current.short : pair.current.original);
+            setMode(target);
             setCopied(false);
-            announce('Original URL restored.');
+            announce(target === 'short' ? 'Short URL restored. Reset to create another URL.' : 'Original URL restored.');
             return;
         }
-        if (mode === 'short') return;
+        if (target === 'long' || mode === 'short') return;
         if (!formRef.current.reportValidity()) return;
         const original = value.trim();
         if (!['http:', 'https:'].includes(new URL(original).protocol)) {
@@ -172,6 +183,13 @@ export default function UrlForm({ onCreated }) {
         }
     }
 
+    function selectExpiration(days) {
+        const expiration = new Date();
+        expiration.setDate(expiration.getDate() + days);
+        setExpiredAt(toLocalDateTimeInputValue(expiration));
+        announce('');
+    }
+
     const dragging = dragWidth !== null;
     const label = busy ? 'Shortening…' : mode === 'short' ? 'Expand it!' : 'Shorten it!';
     const minimumExpiration = new Date();
@@ -179,7 +197,7 @@ export default function UrlForm({ onCreated }) {
     minimumExpiration.setMinutes(minimumExpiration.getMinutes() + 1);
 
     return (
-        <form ref={formRef} className="url-form" onSubmit={handleSubmit} aria-busy={busy || undefined}>
+        <form ref={formRef} className="url-form" onSubmit={handleSubmit} onReset={resetForm} aria-busy={busy || undefined}>
             <label htmlFor="url">Paste your URL</label>
             <div ref={fieldSpaceRef} className="url-field-space">
                 <div
@@ -197,7 +215,7 @@ export default function UrlForm({ onCreated }) {
                         aria-describedby="url-hint url-status"
                         value={value}
                         onChange={handleInput}
-                        readOnly={busy}
+                        readOnly={busy || Boolean(pair.current)}
                     />
                     <button
                         className="url-toggle"
@@ -225,15 +243,30 @@ export default function UrlForm({ onCreated }) {
                 lang="en"
                 required
                 min={toLocalDateTimeInputValue(minimumExpiration)}
-                aria-describedby="expiration-hint url-status"
+                aria-describedby="url-status"
                 value={expiredAt}
                 onChange={(event) => {
                     setExpiredAt(event.target.value);
                     announce('');
                 }}
-                disabled={busy}
+                disabled={busy || Boolean(pair.current)}
             />
-            <p id="expiration-hint" className="url-hint">Use your local time. The expiration is sent to the service in UTC.</p>
+
+            <fieldset className="expiration-presets" role='group' aria-label='Quick expiration'>
+                {[
+                    { label: '1 day', days: 1 },
+                    { label: '1 week', days: 7 },
+                    { label: '1 month', days: 30}
+                ].map(({label, days}) => (
+                    <button
+                        key={days}
+                        type='button'
+                        className='expiration-chip'
+                        disabled={busy || Boolean(pair.current)}
+                        onClick={() => selectExpiration(days)}
+                    >{label}</button>
+                ))}
+            </fieldset>
             <p id="url-hint" className="url-hint">Pull the button left to shorten. Stretch it right to expand. Or click to switch.</p>
             {mode === 'short' && pair.current?.short === value && (
                 <button
@@ -244,6 +277,9 @@ export default function UrlForm({ onCreated }) {
                     {copied ? '✓ Copied!' : 'Copy short URL'}
                 </button>
             )}
+            <button className="reset-button" type="reset" disabled={busy}>
+                Reset
+            </button>
             <p id="url-status" className="url-status" role="status" aria-live="polite" data-error={String(status.error)}>{status.message}</p>
         </form>
     );

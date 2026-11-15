@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { deleteUrl, isMockApiEnabled, listUrls } from '../lib/api';
+import { deleteUrl, listUrls } from '../lib/api';
 
 function formatExpiration(expiredAt) {
     const expiration = new Date(expiredAt);
@@ -87,11 +87,6 @@ export default function RecentUrls({ refreshKey }) {
     return (
         <section className="url-list" aria-labelledby="recent-urls-heading">
             <h2 id="recent-urls-heading">Recent URLs</h2>
-            {isMockApiEnabled && (
-                <p className="url-list-message" role="status">
-                    Demo mode: these URLs are sample data for interface testing only and will not redirect.
-                </p>
-            )}
             {loading && <p className="url-list-message">Loading URLs…</p>}
             {!loading && listError && (
                 <div className="url-list-error" role="alert">
@@ -134,7 +129,7 @@ export default function RecentUrls({ refreshKey }) {
                                 key={url.short_code}
                             >
                                 <div className="recent-url-details">
-                                    {isExpired || isMockApiEnabled ? (
+                                    {isExpired ? (
                                         <span
                                             className={isExpired ? 'recent-short-url is-expired-link' : 'recent-short-url'}
                                             aria-disabled="true"

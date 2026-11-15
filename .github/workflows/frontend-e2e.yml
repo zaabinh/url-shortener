@@ -20,8 +20,6 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
-        env:
-          NEXT_PUBLIC_USE_MOCK_API: 'false'
       - name: Install Playwright browser
         working-directory: frontend
         run: ./node_modules/.bin/playwright install --with-deps chromium

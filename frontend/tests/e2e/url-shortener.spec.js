@@ -222,10 +222,8 @@ test('offers retry after a list timeout and displays the refreshed data', async 
 });
 
 test('rejects a non-array list response with a TypeError', async () => {
-    const previousMockSetting = process.env.NEXT_PUBLIC_USE_MOCK_API;
     const previousApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
     const originalFetch = globalThis.fetch;
-    process.env.NEXT_PUBLIC_USE_MOCK_API = 'false';
     process.env.NEXT_PUBLIC_API_BASE_URL = '';
 
     try {
@@ -240,11 +238,6 @@ test('rejects a non-array list response with a TypeError', async () => {
         });
     } finally {
         globalThis.fetch = originalFetch;
-        if (previousMockSetting === undefined) {
-            delete process.env.NEXT_PUBLIC_USE_MOCK_API;
-        } else {
-            process.env.NEXT_PUBLIC_USE_MOCK_API = previousMockSetting;
-        }
         if (previousApiBaseUrl === undefined) {
             delete process.env.NEXT_PUBLIC_API_BASE_URL;
         } else {
@@ -254,10 +247,8 @@ test('rejects a non-array list response with a TypeError', async () => {
 });
 
 test('maps list and delete timeout errors to retryable messages', async () => {
-    const previousMockSetting = process.env.NEXT_PUBLIC_USE_MOCK_API;
     const previousApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
     const originalFetch = globalThis.fetch;
-    process.env.NEXT_PUBLIC_USE_MOCK_API = 'false';
     process.env.NEXT_PUBLIC_API_BASE_URL = '';
 
     try {
@@ -278,52 +269,6 @@ test('maps list and delete timeout errors to retryable messages', async () => {
         });
     } finally {
         globalThis.fetch = originalFetch;
-        if (previousMockSetting === undefined) {
-            delete process.env.NEXT_PUBLIC_USE_MOCK_API;
-        } else {
-            process.env.NEXT_PUBLIC_USE_MOCK_API = previousMockSetting;
-        }
-        if (previousApiBaseUrl === undefined) {
-            delete process.env.NEXT_PUBLIC_API_BASE_URL;
-        } else {
-            process.env.NEXT_PUBLIC_API_BASE_URL = previousApiBaseUrl;
-        }
-    }
-});
-
-test('disables mock mode in production even when the mock flag is enabled', async () => {
-    const previousNodeEnv = process.env.NODE_ENV;
-    const previousMockSetting = process.env.NEXT_PUBLIC_USE_MOCK_API;
-    const previousApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-    const originalFetch = globalThis.fetch;
-    process.env.NODE_ENV = 'production';
-    process.env.NEXT_PUBLIC_USE_MOCK_API = 'true';
-    process.env.NEXT_PUBLIC_API_BASE_URL = '';
-
-    try {
-        const source = await readFile(path.resolve(process.cwd(), 'lib/api.js'), 'utf8');
-        const api = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}#production`);
-        let requested = false;
-        globalThis.fetch = async () => {
-            requested = true;
-            return new Response('[]', { headers: { 'Content-Type': 'application/json' } });
-        };
-
-        expect(api.isMockApiEnabled).toBe(false);
-        await expect(api.listUrls()).resolves.toEqual([]);
-        expect(requested).toBe(true);
-    } finally {
-        globalThis.fetch = originalFetch;
-        if (previousNodeEnv === undefined) {
-            delete process.env.NODE_ENV;
-        } else {
-            process.env.NODE_ENV = previousNodeEnv;
-        }
-        if (previousMockSetting === undefined) {
-            delete process.env.NEXT_PUBLIC_USE_MOCK_API;
-        } else {
-            process.env.NEXT_PUBLIC_USE_MOCK_API = previousMockSetting;
-        }
         if (previousApiBaseUrl === undefined) {
             delete process.env.NEXT_PUBLIC_API_BASE_URL;
         } else {

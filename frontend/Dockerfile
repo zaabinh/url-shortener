@@ -6,7 +6,6 @@ COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 
 COPY . .
-ENV NEXT_PUBLIC_USE_MOCK_API=false
 RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.27-alpine

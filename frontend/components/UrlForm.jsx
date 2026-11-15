@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { isMockApiEnabled, shortenUrl } from '../lib/api';
+import { shortenUrl } from '../lib/api';
 
 function toLocalDateTimeInputValue(date) {
     const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
@@ -88,9 +88,7 @@ export default function UrlForm({ onCreated }) {
             setValue(short);
             setCopied(false);
             onCreated?.();
-            announce(isMockApiEnabled
-                ? 'Demo URL created for interface testing only; it will not redirect.'
-                : `Short URL ready. Expires ${formatExpiration(expirationDate)}. Click or stretch the button right to restore the original.`);
+            announce(`Short URL ready. Expires ${formatExpiration(expirationDate)}. Click or stretch the button right to restore the original.`);
         } catch (error) {
             setMode('long');
             announce(error instanceof Error

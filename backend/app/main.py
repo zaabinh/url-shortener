@@ -1,55 +1,41 @@
-from datetime import datetime, timezone
-from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
-from sqlalchemy.orm import Session
-from sqlalchemy import text
+import logging
 
-from app.db.database import get_db, engine, Base
-from app.db.models import URL
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
 from app.api.urls import router as urls_router
 from app.core.config import settings
+from app.services.url_service import CodeGenerationError
 
-# Khởi tạo bảng DB nếu chưa có (an toàn khi chạy local/test)
-# Base.metadata.create_all(bind=engine)
-
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 app = FastAPI(title="URL Shortener API")
-
-# 1. Khôi phục CORS Middleware cho local Next.js (:3000) -> FastAPI (:8000)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type"],
 )
-
 app.include_router(urls_router)
 
-# 2. Health check tối ưu: Không query bừa bãi hoặc in toàn bộ URL gây crash khi chưa có bảng
+
+@app.exception_handler(SQLAlchemyError)
+def database_error(request: Request, error: SQLAlchemyError):
+    # Driver exception text can contain SQL, URL data or connection credentials.
+    logger.error("Database request failed: %s", type(error).__name__)
+    code = 409 if isinstance(error, IntegrityError) else 503
+    message = "Database conflict" if code == 409 else "Database temporarily unavailable"
+    return JSONResponse(status_code=code, content={"detail": message}, headers={"Cache-Control": "no-store"})
+
+
+@app.exception_handler(CodeGenerationError)
+def code_generation_error(request: Request, error: CodeGenerationError):
+    return JSONResponse(status_code=503, content={"detail": "Could not allocate a short URL; try again"}, headers={"Retry-After": "1"})
+
+
 @app.get("/app/health")
 def health_check():
     return {"status": "healthy"}
-
-# 3. Endpoint Redirect /{short_code}
-@app.get("/{short_code}")
-def redirect_to_url(short_code: str, db: Session = Depends(get_db)):
-    db_url = db.query(URL).filter(URL.short_code == short_code).first()
-    
-    if not db_url:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Short URL not found")
-        
-    now = datetime.now(timezone.utc)
-    
-    # Kiểm tra hết hạn -> Trả về 410 Gone (sử dụng expired_at theo đúng model thực tế)
-    if db_url.expired_at and db_url.expired_at <= now:
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="URL has expired")
-        
-    # Atomic update click_count tránh lost update khi truy cập đồng thời
-    db.query(URL).filter(URL.short_code == short_code).update(
-        {"click_count": URL.click_count + 1}
-    )
-    db.commit()
-    
-    # Trả về mã 302 Found đúng spec
-    return RedirectResponse(url=db_url.original_url, status_code=status.HTTP_302_FOUND)

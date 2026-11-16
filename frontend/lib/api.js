@@ -1,39 +1,16 @@
-// Empty in production builds: the API is served on the same origin through Nginx.
+// An empty base URL sends API requests to the page's origin.
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
-const USE_MOCK_API = process.env.NODE_ENV !== 'production'
-    && process.env.NEXT_PUBLIC_USE_MOCK_API === 'true';
-const MOCK_STORAGE_KEY = 'url-shortener-demo-urls';
 const REQUEST_TIMEOUT_MS = 15_000;
-
-export const isMockApiEnabled = USE_MOCK_API;
-
-
-// test UI
-function readMockUrls() {
-    if (typeof window === 'undefined') {
-        throw new TypeError('Demo URL storage is only available in the browser.');
+export function getShortUrl(shortCode) {
+    if (typeof shortCode !== 'string' || !shortCode.trim()) {
+        throw new TypeError('The service returned an invalid short code.');
     }
-
-    const stored = window.localStorage.getItem(MOCK_STORAGE_KEY);
-    if (stored === null) return [];
-
-    const urls = JSON.parse(stored);
-    if (!Array.isArray(urls) || !urls.every((url) => (
-        url
-        && typeof url.short_code === 'string'
-        && typeof url.short_url === 'string'
-        && typeof url.original_url === 'string'
-        && typeof url.click_count === 'number'
-        && (url.expired_at === undefined
-            || (typeof url.expired_at === 'string' && !Number.isNaN(Date.parse(url.expired_at))))
-    ))) {
-        throw new TypeError('Stored demo URL data is invalid. Clear the demo URLs and try again.');
+    const base = API_BASE_URL || window.location.origin;
+    const url = new URL(`${base.replace(/\/$/, '')}/api/urls/${encodeURIComponent(shortCode)}`);
+    if (!['http:', 'https:'].includes(url.protocol)) {
+        throw new TypeError('The service returned an invalid URL.');
     }
-    return urls;
-}
-
-function writeMockUrls(urls) {
-    window.localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(urls));
+    return url.href;
 }
 
 function normalizeExpiration(expiredAt) {
@@ -79,37 +56,17 @@ function getRequestError(action, error) {
     return new Error(`Could not ${subject} because the service could not be reached. Check your connection and try again.`);
 }
 
-function shortenUrlWithMock(originalUrl, expiredAt) {
-    const urls = readMockUrls();
-    let shortCode;
-    do {
-        shortCode = Math.random().toString(36).slice(2, 9);
-    } while (urls.some((url) => url.short_code === shortCode));
-
-    const shortUrl = `https://short.example/${shortCode}`;
-    urls.unshift({
-        short_code: shortCode,
-        short_url: shortUrl,
-        original_url: originalUrl,
-        click_count: 0,
-        expired_at: expiredAt,
-    });
-    writeMockUrls(urls);
-    return shortUrl;
-}
-//
-
-// The backend accepts { original_url, expired_at } and returns { short_url }.
+// The backend returns the short code; redirect URLs use the same API origin.
 export async function shortenUrl(originalUrl, expirationValue) {
     const expiredAt = normalizeExpiration(expirationValue);
-    if (USE_MOCK_API) return shortenUrlWithMock(originalUrl, expiredAt);
+    const headers = { 'Content-Type': 'application/json' };
 
     let response;
     try {
         response = await fetch(`${API_BASE_URL}/api/urls`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ original_url: originalUrl, expired_at: expiredAt }),
+            headers,
+            body: JSON.stringify({ original_url: originalUrl, expires_at: expiredAt }),
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
     } catch (error) {
@@ -126,28 +83,15 @@ export async function shortenUrl(originalUrl, expirationValue) {
     } catch {
         throw new Error('The service returned an invalid response.');
     }
-    if (typeof data?.short_url !== 'string') {
-        throw new TypeError('The service returned an invalid URL.');
-    }
 
-    let shortUrl;
-    try {
-        shortUrl = new URL(data.short_url);
-    } catch {
-        throw new Error('The service returned an invalid URL.');
-    }
-    if (!['http:', 'https:'].includes(shortUrl.protocol)) {
-        throw new Error('The service returned an invalid URL.');
-    }
-    return shortUrl.href;
+    return getShortUrl(data?.short_code);
 }
 
-export async function listUrls() {
-    if (USE_MOCK_API) return readMockUrls();
+export async function listUrls({ limit = 20, offset = 0 } = {}) {
 
     let response;
     try {
-        response = await fetch(`${API_BASE_URL}/api/urls`, {
+        response = await fetch(`${API_BASE_URL}/api/urls?limit=${limit}&offset=${offset}`, {
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
     } catch (error) {
@@ -161,16 +105,10 @@ export async function listUrls() {
     if (!Array.isArray(data)) {
         throw new TypeError('The URL list response must be a JSON array.');
     }
-    return data;
+    return data.map((url) => ({ ...url, short_url: getShortUrl(url.short_code) }));
 }
 
 export async function deleteUrl(shortCode) {
-    if (USE_MOCK_API) {
-        const urls = readMockUrls();
-        writeMockUrls(urls.filter((url) => url.short_code !== shortCode));
-        return;
-    }
-
     let response;
     try {
         response = await fetch(`${API_BASE_URL}/api/urls/${encodeURIComponent(shortCode)}`, {

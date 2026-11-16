@@ -1,4 +1,5 @@
 from pathlib import Path
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Xác định đường dẫn tới file .env ở thư mục gốc của dự án
@@ -10,9 +11,12 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
     BASE_URL: str = "http://127.0.0.1:8000"
+    REDIS_URL: str
+    cache_ttl_seconds: int = Field(default=3600, ge=0)
 
     # Danh sách các origin được phép cấu hình qua biến môi trường (phân cách bằng dấu phẩy)
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    short_code_length: int = Field(default=7, ge=1, le=32)
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -25,8 +29,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
-        extra="ignore",
+        extra="allow",
     )
-
 
 settings = Settings()

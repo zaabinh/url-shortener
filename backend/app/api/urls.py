@@ -1,55 +1,66 @@
-from datetime import datetime, timezone
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import URL
-from app.schemas.url import URLCreate, URLResponse
-from app.core.config import settings
-from app.services.url_service import create_short_url
+from app.schemas.url import UrlCreate, UrlResponse
+from app.services import url_service
 
 router = APIRouter(prefix="/api/urls", tags=["urls"])
 
 
-@router.post("", response_model=URLResponse, status_code=status.HTTP_201_CREATED)
-def create_url(payload: URLCreate, db: Session = Depends(get_db)):
-    """Tạo mới một URL rút gọn và trả về short_url hoàn chỉnh."""
-    db_url = create_short_url(db, payload, settings.BASE_URL)
-    
-    # Chuyển đổi sang schema response và gán đầy đủ short_url
-    response_data = URLResponse.model_validate(db_url)
-    response_data.short_url = f"{settings.BASE_URL}/{db_url.short_code}"
-    
-    return response_data
+@router.post(
+    "", response_model=UrlResponse, status_code=status.HTTP_201_CREATED,
+    responses={
+        409: {"description": "Database constraint conflict"},
+        503: {"description": "Database unavailable or short code allocation exhausted"},
+    },
+)
+def create_url(payload: UrlCreate, response: Response, db: Session = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    return url_service.create_short_url(db, payload)
 
 
-@router.get("", response_model=List[URLResponse])
-def list_urls(db: Session = Depends(get_db)):
-    """Lấy danh sách tất cả URL kèm theo short_url chuẩn."""
-    urls = db.query(URL).all()
+@router.get(
+    "", response_model=list[UrlResponse],
+    responses={503: {"description": "Database temporarily unavailable"}},
+)
+def list_urls(
+    response: Response,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    response.headers["Cache-Control"] = "no-store"
+    return url_service.list_urls(db, limit, offset)
 
-    result = []
-    for item in urls:
-        data = URLResponse.model_validate(item)
-        # Gán short_url chuẩn cho từng bản ghi trong danh sách
-        data.short_url = f"{settings.BASE_URL}/{item.short_code}"
-        result.append(data)
 
-    return result
+@router.delete(
+    "/{short_code}", status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        404: {"description": "URL not found"},
+        503: {"description": "Database temporarily unavailable"},
+    },
+)
+def delete_url(short_code: str = Path(min_length=1, max_length=32), db: Session = Depends(get_db)):
+    if not url_service.delete_url(db, short_code):
+        raise HTTPException(404, "URL not found")
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
 
-@router.delete("/{short_code}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_url(short_code: str, db: Session = Depends(get_db)):
-    """Xóa URL theo short_code khớp với yêu cầu từ Frontend."""
-    db_url = db.query(URL).filter(URL.short_code == short_code).first()
-    
-    if not db_url:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="URL not found"
-        )
-
-    db.delete(db_url)
-    db.commit()
-    return None
+@router.get(
+    "/{short_code}", response_class=RedirectResponse, status_code=302,
+    responses={
+        302: {"description": "Redirect to the original URL"},
+        404: {"description": "Short URL not found"},
+        410: {"description": "URL has expired"},
+        503: {"description": "Database temporarily unavailable"},
+    },
+)
+def redirect_to_url(short_code: str = Path(min_length=1, max_length=32), db: Session = Depends(get_db)):
+    destination, result_status = url_service.resolve_short_code(db, short_code)
+    if result_status == 404:
+        raise HTTPException(404, "Short URL not found")
+    if result_status == 410:
+        raise HTTPException(410, "URL has expired")
+    return RedirectResponse(destination, status_code=302, headers={"Cache-Control": "no-store"})

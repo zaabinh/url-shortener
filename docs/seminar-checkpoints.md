@@ -56,3 +56,39 @@ Remove-Item Env:SMOKE_BASE_URL
 ```
 - **NOTE:** Since `DATABASE_URL` host is set to host.docker.internal so Docker backend can connect to running PostgresSQL database on local device
 
+# 5. Registry and PostgreSQL container
+
+- Registry is the place containing images which can be private/public. DockerHub is a cloud-based registy where developers push and pull images and container (Like GitHub)
+- Pull postgres image instead of create a new one
+```powershell
+// postgres is repository, 17-alpine is tag
+docker pull postgres:17-alpine
+// 
+docker image inspect postgres:17-alpine --format '{{json .RepoDigests}}'
+```
+- Run container
+```powershell 
+docker run -d --name seminar-pg `
+  -e POSTGRES_USER=shortener_user `
+  -e POSTGRES_PASSWORD=shortener_password `
+  -e POSTGRES_DB=url_shortener `
+  -p 127.0.0.1:5433:5432 `
+  --mount "type=bind,source=$initSql,target=/docker-entrypoint-initdb.d/001-init.sql,readonly" `
+  postgres:17-alpine
+```
+
+- Add waiting function to no run SQL before DB ready
+
+```powershell
+function Wait-Pg([string]$Container) {
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        docker exec $Container pg_isready -h 127.0.0.1 -U shortener_user -d url_shortener *> $null
+        if ($LASTEXITCODE -eq 0) { return }
+        Start-Sleep -Seconds 1
+    }
+    throw "PostgreSQL not ready: $Container. Inspect docker logs."
+}
+Wait-Pg seminar-pg
+docker logs --tail 30 seminar-pg
+docker exec seminar-pg psql -U shortener_user -d url_shortener -c '\d urls'
+```

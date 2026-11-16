@@ -1285,7 +1285,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.txt
+      - run: >-
+          python -m pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.txt
       - run: python -m pytest -q
         working-directory: backend
 
@@ -1335,9 +1336,21 @@ jobs:
       - name: Build and start
         run: docker compose up -d --build --wait --wait-timeout 180
       - name: Test backend
-        run: docker compose --profile test run --build --rm tests
+        run: |
+          docker compose --profile test build tests
+          docker compose --profile test run --rm --no-deps tests
       - name: Test through Nginx
-        run: docker compose --profile test run --rm -e SMOKE_BASE_URL=http://frontend:8080 tests
+        run: |
+          curl --fail --silent --show-error http://localhost:8080/ -o /dev/null
+          docker compose --profile test run --rm --no-deps -e SMOKE_BASE_URL=http://frontend:8080 tests
+      - name: Test real Redis cache
+        run: docker compose --profile test run --rm --no-deps tests python tests/docker_cache.py
+      - name: Test Redis outage and restore Redis
+        shell: bash
+        run: |
+          trap 'docker compose start redis' EXIT
+          docker compose stop redis
+          docker compose --profile test run --rm --no-deps tests python tests/docker_cache.py --fallback
       - name: Logs
         if: always()
         run: docker compose logs --no-color

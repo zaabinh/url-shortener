@@ -18,6 +18,7 @@ learning guide is [docker_integration.md](../docker_integration.md).
 | 07 | `seminar/07-volume` | Preserve data across database container replacement |
 | 08 | `seminar/08-compose` | Orchestrate frontend, backend, and PostgreSQL |
 | 09 | `seminar/09-redis` | Verify cache behavior, fallback, and section 9.6 |
+| 10 | `seminar/10-architecture` | Architecture inspection, real integration tests, and CI |
 
 Git tags identify source snapshots; Docker image tags identify packaged artifacts.
 Existing source tags 00-08 are retained. Phase 9 extends the existing Redis commit.
@@ -212,6 +213,80 @@ Redis is stopped. Use `run --no-deps`: starting dependencies during this test co
 restart Redis and invalidate the experiment. Tests only remove their own records
 and keys; they do not issue `FLUSHALL`.
 
+## Phase 10: Architecture and CI
+
+```mermaid
+flowchart LR
+    Browser[Host browser] -->|localhost:8080| Nginx[Nginx + static Next.js]
+    subgraph edge[edge network]
+        Nginx -->|backend:8000 API and redirects| Backend[FastAPI]
+        Tests[Temporary test runner] --> Backend
+    end
+    subgraph data[internal data network]
+        Backend -->|postgres:5432| PG[(PostgreSQL)]
+        Backend -->|redis:6379| Cache[(Redis)]
+        Tests -. direct assertions .-> PG
+        Tests -. direct assertions .-> Cache
+    end
+    PG --> Disk[(Named volume pg_data)]
+    CLI[Docker and Compose CLI] --> Engine[Docker Engine]
+    Registry[Image registry] -->|pull| Engine
+    Source[Source + Dockerfiles] -->|build| Engine
+    Engine -. manages .-> Nginx
+    Engine -. manages .-> Backend
+    Engine -. manages .-> PG
+    Engine -. manages .-> Cache
+```
+
+The browser receives a 302 Location and visits the destination itself. The backend
+does not fetch that website. Compose declares and manages infrastructure through
+the Engine; neither Compose nor the registry handles redirect requests.
+
+`10-architecture.ps1` inspects networks, volume, and published ports; runs the same
+HTTP smoke suite directly against FastAPI and through Nginx; then runs real cache
+checks. These are different paths through the same system, not different business
+test cases. A static-page assertion also detects a broken frontend image copy.
+
+`.github/workflows/ci.yml` retains SQLite backend tests, Node helper tests, the
+static build, and browser tests with intercepted APIs. The pip command now uses
+a YAML folded scalar: the colon followed by whitespace in `--only-binary=:all:`
+made the original plain scalar invalid YAML. Dependency versions and hashes have
+not been loosened.
+
+`.github/workflows/docker-smoke.yml` adds real PostgreSQL/Redis integration in a
+fresh runner. It validates Compose, builds and waits, builds the test target,
+checks static serving, tests both HTTP paths, checks Redis, stops Redis for the
+outage test, and restores it with a shell trap. All test containers use `--rm` and
+the outage test uses `--no-deps`. Logs and cleanup execute even after failure.
+Deleting CI volumes is appropriate for that isolated disposable job, not normal
+operation of a database containing user data. The workflow does not publish or deploy.
+
+The live browser test can now target Docker without editing source: set
+`PLAYWRIGHT_LIVE_BASE_URL` and `PLAYWRIGHT_LIVE_API_URL` to the Nginx origin and use
+`playwright.live.config.mjs`. Defaults retain the local ports 3000 and 8000.
+This test uses actual browser form submission and a real API/database; redirect
+and deletion assertions use Playwright's HTTP client without following redirects.
+
+### Applied practices and limits
+
+| Context | Benefit | Responsibility still required |
+|---|---|---|
+| Development | Consistent runtime, database and cache | Environment values and hot reload strategy |
+| Testing | Repeatable services and real integration paths | Independent data, useful assertions |
+| CI/CD | Build and test before distribution | Secrets, registry permissions and rollout policy |
+| Deployment | Reusable image artifact | TLS, migrations, backups, monitoring and capacity |
+
+Dependency-first copies and BuildKit caches reduce rebuild work. Multi-stage
+frontend builds omit Node from runtime, and backend runtime omits test code.
+Only the necessary entry port is published. Database data uses a named volume,
+and Redis is disposable. Logs go to stdout/stderr. No rate limiter, account system,
+queue, or orchestration platform has been added to this small seminar application.
+
+Base image tags remain mutable and are not digest-pinned, so rebuilding an old
+source tag is not a guarantee of byte-identical artifacts. The demo has no TLS,
+high availability, backup restore automation, migration framework, or production
+resource sizing. These are stated limits, not claims that Docker supplies them.
+
 ## Official references
 
 - [Compose startup ordering](https://docs.docker.com/compose/how-tos/startup-order/)
@@ -235,6 +310,10 @@ volume. The existing `url-shortener-seminar` stack and its stored data are retai
 | Real cache suite | 3 passed: MISS/HIT/delete, expiration, stale destination |
 | Real Redis outage suite | 1 passed; redirects and clicks work while Redis is stopped |
 | HTTP smoke suite through Nginx | 2 passed: CRUD/redirect/clicks and expiration |
+| Phase 10 script | Passed all five steps; direct backend and proxied smoke paths |
+| Live Playwright through Nginx | 1 passed using the real Docker API and database |
+| Frontend helper and browser regression | 3 Node tests and 18 intercepted-API browser tests passed |
+| GitHub Actions syntax | Both workflows passed actionlint 1.7.7 |
 
 These results do not prove a performance gain or production readiness. A CI
 workflow must run on its remote runner before its hosted result can be reported.

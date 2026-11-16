@@ -1,0 +1,38 @@
+name: Docker smoke
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate configuration
+        run: docker compose config --quiet
+      - name: Build and start
+        run: docker compose up -d --build --wait --wait-timeout 180
+      - name: Test backend
+        run: |
+          docker compose --profile test build tests
+          docker compose --profile test run --rm --no-deps tests
+      - name: Test through Nginx
+        run: |
+          curl --fail --silent --show-error http://localhost:8080/ -o /dev/null
+          docker compose --profile test run --rm --no-deps -e SMOKE_BASE_URL=http://frontend:8080 tests
+      - name: Test real Redis cache
+        run: docker compose --profile test run --rm --no-deps tests python tests/docker_cache.py
+      - name: Test Redis outage and restore Redis
+        shell: bash
+        run: |
+          trap 'docker compose start redis' EXIT
+          docker compose stop redis
+          docker compose --profile test run --rm --no-deps tests python tests/docker_cache.py --fallback
+      - name: Logs
+        if: always()
+        run: docker compose logs --no-color
+      - name: Cleanup isolated CI environment
+        if: always()
+        run: docker compose down -v --remove-orphans

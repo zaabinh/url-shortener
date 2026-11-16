@@ -283,3 +283,56 @@ Warning httpx không phải test failure. Dev dependency hiện vẫn khóa http
 - Không cộng các kiểm tra Docker thủ công hoặc ví dụ smoke trong walkthrough vào 76 test ở đây; bảng chỉ kiểm kê các test file hiện có.
 
 Khi thêm/sửa test, cập nhật hàng tương ứng và kết quả chạy có ngày/môi trường. Không ghi pass chỉ vì đã thêm code test.
+
+## 9. Docker integration checks (17 November 2026)
+
+These opt-in checks use real PostgreSQL and Redis rather than pytest's SQLite and
+mocked cache. They are separate from the original inventory of 76 tests above:
+two HTTP smoke cases and four cache/outage cases, six additional unique cases.
+Running the smoke suite against both backend and Nginx exercises two HTTP paths
+without creating new unique business test cases.
+
+| Source / mode | Cases | Assertions |
+|---|---|---|
+| `backend/tests/smoke_api.py` | 2 | Create/list/302/Location/counter/delete/404; expiration 410 |
+| `backend/tests/docker_cache.py` | 3 | MISS/HIT/clicks/delete invalidation; TTL and 410 without extra clicks; stale cached destination repaired |
+| `backend/tests/docker_cache.py --fallback` | 1 | Redis is genuinely unavailable; active redirects still return 302, counters increase exactly, delete and 404 work |
+
+```powershell
+docker compose up -d --build --wait --wait-timeout 180
+docker compose --profile test build tests
+docker compose --profile test run --rm --no-deps tests
+docker compose --profile test run --rm --no-deps -e SMOKE_BASE_URL=http://frontend:8080 tests
+docker compose --profile test run --rm --no-deps tests python tests/docker_cache.py
+docker compose stop redis
+try {
+    docker compose --profile test run --rm --no-deps tests python tests/docker_cache.py --fallback
+    if ($LASTEXITCODE -ne 0) { throw 'Redis outage test failed' }
+} finally {
+    docker compose start redis
+}
+```
+
+Run fallback only on a demo/test stack: it intentionally stops Redis. The test
+scripts delete only their own records and keys. They do not flush databases.
+The Compose test profile supplies real DB/cache settings and network access.
+`.github/workflows/docker-smoke.yml` runs these checks in a disposable CI job;
+its cleanup deletes only that job's isolated data volume.
+
+To run the existing live browser case through Docker's Nginx entry point:
+
+```powershell
+$env:PLAYWRIGHT_LIVE_BASE_URL = 'http://localhost:8080'
+$env:PLAYWRIGHT_LIVE_API_URL = 'http://localhost:8080'
+Push-Location frontend
+try { npm.cmd run test:e2e -- --config=playwright.live.config.mjs }
+finally {
+    Pop-Location
+    Remove-Item Env:PLAYWRIGHT_LIVE_BASE_URL, Env:PLAYWRIGHT_LIVE_API_URL
+}
+```
+
+Local defaults are unchanged. Observed on the isolated `url-shortener-verify`
+project at port 18080: backend 54 passed, HTTP smoke 2 passed on each path,
+cache 3 passed, outage 1 passed, live browser 1 passed. Both CI workflow files
+passed actionlint 1.7.7. Hosted GitHub Actions execution is not claimed here.

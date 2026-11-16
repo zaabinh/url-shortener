@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 test('creates a URL, redirects and deletes it', async ({ page, request }) => {
-    const api = 'http://localhost:8000';
+    const api = (process.env.PLAYWRIGHT_LIVE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
     let code;
     const customCode = `e2e${Date.now()}`;
 

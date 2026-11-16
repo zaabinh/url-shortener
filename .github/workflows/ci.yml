@@ -12,7 +12,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.txt
+      - run: >-
+          python -m pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.txt
       - run: python -m pytest -q
         working-directory: backend
 

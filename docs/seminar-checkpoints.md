@@ -19,6 +19,7 @@ learning guide is [docker_integration.md](../docker_integration.md).
 | 08 | `seminar/08-compose` | Orchestrate frontend, backend, and PostgreSQL |
 | 09 | `seminar/09-redis` | Verify cache behavior, fallback, and section 9.6 |
 | 10 | `seminar/10-architecture` | Architecture inspection, real integration tests, and CI |
+| 11 | `seminar/11-final` | Paused scripts, scoped reset, persistence, and final report |
 
 Git tags identify source snapshots; Docker image tags identify packaged artifacts.
 Existing source tags 00-08 are retained. Phase 9 extends the existing Redis commit.
@@ -287,6 +288,86 @@ source tag is not a guarantee of byte-identical artifacts. The demo has no TLS,
 high availability, backup restore automation, migration framework, or production
 resource sizing. These are stated limits, not claims that Docker supplies them.
 
+## Phase 11: Rehearsal and final architecture
+
+The [PowerShell scripts](../scripts/seminar/README.md) cover phases 0-11
+individually. Each numbered action prints a teaching objective and waits for Enter.
+The next prompt is the presentation break. Q stops before an action. `-ListSteps`
+lists without executing Docker, `-FromStep N` skips earlier actions, and
+`-NonInteractive` deliberately bypasses pauses for automated rehearsal.
+
+Steps can depend on earlier state: for phase-9 HIT, start at step 2 to create the
+code; for phase-11 persistence, start at step 3. Section 9.6 begins at step 5 and
+creates independent records. FromStep does not serialize variables between runs.
+
+`common.ps1` resolves repository paths, checks external exit codes, reads SQL/cache
+evidence, and checks HTTP without following redirects. SQL is sent on stdin because
+Windows PowerShell 5.1 can lose nested native-command quotes. PostgreSQL username
+and database are read from the container, honoring Compose overrides.
+`manual.ps1` supplies standalone-container helpers and the local smoke runner.
+Its health probe uses IPv4 to match the published address and avoid the Windows
+localhost IPv6 probe delay observed during rehearsal.
+
+Manual phases stop on name conflicts. Phase 7 intentionally removes the disposable
+database's anonymous volume, proves its marker is lost, then verifies a named-volume
+marker survives replacement. Its exported backup, `seminar-backup.sql`, is ignored
+by Git. Phase 8 uses `docker/compose.phase08.yaml` to disable Redis on the final
+branch. Its `!override` merge requires Compose 2.24.4+. Phase 9 uses the main file
+alone. Use a fresh project or reset before moving backward from phase 9 to phase 8,
+otherwise a previously running Redis can remain.
+
+### Final persistence proof
+
+`11-final.ps1` runs both smoke paths and the cache suite, then creates a one-day
+URL. It runs `compose down` without `-v` and starts new containers. Redis initially
+has no key, PostgreSQL retains the row and count, the first redirect returns 302,
+the count increases once, and Redis is populated again. The marker is then deleted.
+The named volume explains persistence; the image and cache do not contain that data.
+
+### Phase-0 reset boundaries
+
+`00-reset.ps1` previews by default. `-Apply` authorizes removal of seminar
+containers/networks/application image tags. `-DeleteData` additionally authorizes
+anonymous and named database volume deletion. `-IncludeBaseImages` also targets six
+seminar base references. Interactive execution requires the literal RESET and still
+pauses before each step. Merely listing or previewing cannot delete resources.
+
+Containers are selected by exact Compose project label or exact manual-name
+allowlist; networks and volumes are explicit names. Application image tags include
+p03, seminar, selected-project test images, and local backend registry aliases.
+Images used by remaining containers are reported and skipped. Image removal never
+uses force, and no global prune is issued. Shared base images and builder cache can
+remain intentionally. Removing image tags does not guarantee a cold build.
+
+Reset was exercised on newly created verification resources; original demo
+container identities were compared before and after and remained unchanged.
+Source files, tags/history, local PostgreSQL, and unrelated projects are outside
+the reset scope. The default demo database was not reset during this work.
+
+### Presenting with source tags
+
+Tags 00-08 remain historical snapshots and do not contain later scripts. Keep the
+final checkout for scripted rehearsal, or use a worktree to inspect an older
+snapshot. Old tags are not rewritten to add helpers. Switching Git does not update
+running containers, volumes, initialized credentials, or ignored environment files.
+
+### Questions to prepare
+
+1. Why is EXPOSE insufficient? Host-port publication and a listening process are
+   also required.
+2. Why is localhost wrong between containers? Each has a network namespace; Docker
+   DNS names identify peers on a shared user-defined network.
+3. Why does init.sql not run again? Initialization requires an empty data directory;
+   an existing schema needs a migration.
+4. Why does HIT still use PostgreSQL? This application validates expiry/destination
+   and maintains an exact durable counter on every successful redirect.
+5. Why did restarting Redis not fix 410? The link had expired; unsuccessful attempts
+   do not increment click_count.
+6. Why is a volume not a backup? It holds live state; independent backup/restore
+   remains necessary.
+7. Does Compose provide HA or TLS? Those need additional operations; this is a
+   single-host teaching architecture.
+
 ## Official references
 
 - [Compose startup ordering](https://docs.docker.com/compose/how-tos/startup-order/)
@@ -314,6 +395,15 @@ volume. The existing `url-shortener-seminar` stack and its stored data are retai
 | Live Playwright through Nginx | 1 passed using the real Docker API and database |
 | Frontend helper and browser regression | 3 Node tests and 18 intercepted-API browser tests passed |
 | GitHub Actions syntax | Both workflows passed actionlint 1.7.7 |
+| Manual phases 1-7 | Missing-package failure, lifecycle, port mapping, DNS, SQL/HTTP, data loss and named-volume recovery verified on isolated resources |
+| Phase 8 without Redis | Three healthy services; two smoke cases passed on each HTTP path |
+| Phase 11 persistence | Row/count survived replacement; Redis empty then rebuilt; passed |
+| Reset rehearsal | Preview and scoped removal passed; original demo container identities unchanged |
+| PowerShell validation | All 16 files parse; step listing, skipping, exit handling and shared-image guard checked |
 
 These results do not prove a performance gain or production readiness. A CI
 workflow must run on its remote runner before its hosted result can be reported.
+Phase-0 table initialization and CRUD were not rerun against the personal local
+database; equivalent HTTP cases ran in Docker. Shared base-image deletion was not
+performed, and the exported backup was not restore-tested. These omissions are
+separate from the passing volume-persistence and scoped-reset demonstrations.

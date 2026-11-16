@@ -1,5 +1,21 @@
 # URL Shortener
 
+Docker seminar: [learning guide](docker_integration.md),
+[English checkpoint report](docs/seminar-checkpoints.md), and
+[PowerShell demos with presentation pauses](scripts/seminar/README.md).
+
+```powershell
+docker compose up -d --build --wait --wait-timeout 180
+# Open http://localhost:8080. Only Nginx publishes a host port.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/seminar/09-redis.ps1
+```
+
+The stack contains a static Next.js/Nginx frontend, FastAPI, PostgreSQL with a named
+volume, and disposable Redis. `GET /{code}` redirects; URL management uses
+`/api/urls`. Git checkpoints run from `seminar/00-local` to `seminar/11-final`.
+Phase-0 reset previews by default; `-Apply -DeleteData` explicitly erases seminar
+database data. See the demo guide before resetting.
+
 Local application using Next.js, FastAPI and PostgreSQL. Create short URLs with an optional custom code, redirect, count clicks, set expiration, and browse recent links. Redis caching is optional.
 
 ## Requirements

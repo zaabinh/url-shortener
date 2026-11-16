@@ -1,0 +1,14 @@
+# Demonstrate the three-service architecture from the final branch.
+# !override requires Docker Compose 2.24.4 or newer.
+services:
+  redis:
+    profiles: [cache]
+  backend:
+    environment:
+      REDIS_URL: ""
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+  tests:
+    environment:
+      REDIS_URL: ""

@@ -57,8 +57,14 @@ function Get-DemoClicks([string]$Code) {
 
 function Wait-DemoRedis {
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
-        $pong = & docker compose --project-directory $DemoRoot -f "$DemoRoot/compose.yaml" -p $ProjectName exec -T redis redis-cli ping 2>$null
-        if ($LASTEXITCODE -eq 0 -and $pong -eq 'PONG') { return }
+        $oldPreference = $ErrorActionPreference
+        try {
+            # A failed readiness probe is expected while Redis is starting.
+            $ErrorActionPreference = 'Continue'
+            $pong = & docker compose --project-directory $DemoRoot -f "$DemoRoot/compose.yaml" -p $ProjectName exec -T redis redis-cli ping 2>$null
+            $probeExit = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $oldPreference }
+        if ($probeExit -eq 0 -and $pong -eq 'PONG') { return }
         Start-Sleep -Seconds 1
     }
     throw 'Redis did not recover within 30 seconds.'

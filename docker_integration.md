@@ -51,7 +51,7 @@ Tất cả lệnh bắt đầu ở thư mục gốc repository, trừ nơi có g
 | Thành phần | Hợp đồng dùng xuyên suốt |
 |---|---|
 | Tạo/list URL | `POST /api/urls`, `GET /api/urls` |
-| Redirect/xóa | `GET /api/urls/{short_code}`, `DELETE /api/urls/{short_code}` |
+| Redirect/xóa | `GET /{short_code}`, `DELETE /api/urls/{short_code}` |
 | Health hiện có | `GET /app/health` → `{"status":"healthy"}` |
 | Thời hạn | `expires_at`, không phải `expired_at`; gửi ISO 8601 có múi giờ |
 | Khóa chính | UUID, không phải `SERIAL` |
@@ -282,7 +282,7 @@ class UrlSmokeTests(unittest.TestCase):
 
     def test_crud_redirect_and_clicks(self):
         code = self.create()
-        status, headers, _ = request("GET", f"/api/urls/{code}")
+        status, headers, _ = request("GET", f"/{code}")
         self.assertEqual(status, 302)
         self.assertEqual(headers["Location"], "https://example.com/docker-seminar")
         status, _, body = request("GET", "/api/urls")
@@ -290,13 +290,13 @@ class UrlSmokeTests(unittest.TestCase):
         item = next(item for item in json.loads(body) if item["short_code"] == code)
         self.assertEqual(item["click_count"], 1)
         self.assertEqual(request("DELETE", f"/api/urls/{code}")[0], 204)
-        self.assertEqual(request("GET", f"/api/urls/{code}")[0], 404)
+        self.assertEqual(request("GET", f"/{code}")[0], 404)
         self.codes.remove(code)
 
     def test_expiration(self):
         code = self.create(seconds=3)
         time.sleep(4)
-        self.assertEqual(request("GET", f"/api/urls/{code}")[0], 410)
+        self.assertEqual(request("GET", f"/{code}")[0], 410)
 
 
 if __name__ == "__main__":
@@ -326,6 +326,54 @@ git diff --cached --stat
 git commit -m "seminar: establish working local baseline and smoke tests"
 git tag -a seminar/00-local -m "Local application verified before Docker"
 ```
+
+### 0.8. Script demo có điểm dừng
+
+Các script nằm trong [scripts/seminar](scripts/seminar/README.md). Chạy từng phase
+riêng trên nhánh hoàn chỉnh; script in mục tiêu, chờ Enter rồi mới thực hiện. Sau
+mỗi bước, prompt kế tiếp là điểm ngắt để trình bày. Gõ Q để dừng trước bước tiếp.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/seminar/09-redis.ps1 -ListSteps
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/seminar/09-redis.ps1
+# Bắt đầu section 9.6 với dữ liệu mới:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/seminar/09-redis.ps1 -FromStep 5
+```
+
+`-ListSteps` không chạy Docker/HTTP. `-NonInteractive` bỏ các điểm dừng để diễn tập
+tự động. `-FromStep` không khôi phục biến của lần chạy đã thoát: HIT phase 9 cần
+bắt đầu từ bước 2; persistence phase 11 cần từ bước 3.
+
+| Phase | Script |
+|---|---|
+| 0 | `00-local.ps1`, `00-reset.ps1` |
+| 1–4 | `01-problem.ps1`, `02-concepts.ps1`, `03-image.ps1`, `04-ports.ps1` |
+| 5–8 | `05-registry-db.ps1`, `06-network.ps1`, `07-volume.ps1`, `08-compose.ps1` |
+| 9–11 | `09-redis.ps1`, `10-architecture.ps1`, `11-final.ps1` |
+
+Manual phases 2–7 chạy tuần tự. Phase 7 cố ý xóa dữ liệu DB demo không có named
+volume. Phase 8 dùng overlay để tắt Redis trên checkout hoàn chỉnh; cần Compose
+2.24.4+. Phase 9 dùng main Compose file. Không chạy phase 8 trên stack phase 9
+đang có Redis nếu chưa reset hoặc chọn project khác.
+
+Reset mặc định chỉ preview; lệnh đầy đủ để làm lại từ đầu:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/seminar/00-reset.ps1
+# Xóa container/network/image demo, cả DB demo, và các base image không dùng chung:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/seminar/00-reset.ps1 -Apply -DeleteData -IncludeBaseImages
+```
+
+Lệnh thứ hai xóa dữ liệu và yêu cầu nhập RESET; vẫn có điểm dừng trước từng bước.
+Script chỉ quản lý project `url-shortener-seminar` và tên manual `seminar-*` trong
+allowlist. Image còn được container khác dùng sẽ được báo và giữ lại; không có
+global prune. Builder cache dùng chung được giữ lại, nên bỏ image tag không đồng
+nghĩa cold build. Không xóa Git tags, source hoặc PostgreSQL local.
+
+Các tag 00–08 là snapshot lịch sử, không chứa script viết sau. Giữ final checkout
+để demo bằng script; dùng worktree nếu muốn xem source cũ. Không ghi đè tag cũ.
+Các lệnh commit/tag trong bài là mẫu cho người học tạo repo mới; repo hiện tại đã
+có checkpoint, không cần chạy lại để tạo trùng tag.
 
 ## 1. Mở đầu: It works on my machine
 
@@ -737,12 +785,23 @@ git tag -a seminar/07-volume -m "Named volume persistence verified"
 Thay `backend/Dockerfile` bằng:
 
 ```dockerfile
+# syntax=docker/dockerfile:1
+
 FROM python:3.12-slim AS base
+
 WORKDIR /app
+
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+
 COPY requirements.txt ./
-RUN python -m pip install --no-cache-dir --require-hashes --only-binary=:all: -r requirements.txt
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install \
+    --require-hashes \
+    --only-binary=:all: \
+    -r requirements.txt
+
 COPY app ./app
 
 FROM base AS test
@@ -756,7 +815,7 @@ EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-Runtime là stage cuối nên `docker build ./backend` mặc định chọn nó. Test target chỉ cần stdlib smoke script và không tự import app/đụng DB khi chạy; test sẽ gọi backend qua HTTP. Backend runtime chạy non-root; PostgreSQL lưu dữ liệu ở container riêng.
+Runtime là stage cuối nên `docker build ./backend` mặc định chọn nó. Test target mặc định chạy smoke script stdlib, gọi backend qua HTTP. Từ phase 9, có thể chọn thêm `tests/docker_cache.py` để kiểm tra trực tiếp PostgreSQL và Redis. Không loại `tests/` trong `.dockerignore`, vì test stage cần copy thư mục này. Backend runtime chạy non-root; PostgreSQL lưu dữ liệu ở container riêng.
 
 ### 8.2. Frontend: build Next.js, serve bằng Nginx
 
@@ -777,22 +836,33 @@ playwright-report
 Tạo `frontend/Dockerfile`:
 
 ```dockerfile
+# syntax=docker/dockerfile:1
+
 FROM node:22-alpine AS builder
+
 WORKDIR /app
+
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts
+
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --ignore-scripts
+
 COPY . .
-ENV NEXT_PUBLIC_API_BASE_URL=""
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:stable-alpine
+FROM nginx:1.27-alpine AS runner
+
+RUN rm /etc/nginx/conf.d/default.conf
+
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/out /usr/share/nginx/html
-USER 101:101
+
 EXPOSE 8080
+
+CMD ["nginx", "-g", "daemon off;"]
 ```
 
-Đây là multi-stage build: image chạy chỉ cần Nginx và static assets, không cần Node/npm. Các tag major/stable trong tài liệu ưu tiên dễ làm theo; sau buổi học, khóa phiên bản/digest được kiểm thử để tái lập chính xác hơn. [Multi-stage build guidance](https://docs.docker.com/build/building/multi-stage/)
+Đây là multi-stage build: image chạy chỉ cần Nginx và static assets, không cần Node/npm. Bản repo hiện tại dùng `nginx:1.27-alpine` với master process mặc định root; chỉ backend được cấu hình non-root. Các tag image còn mutable; sau buổi học, khóa digest đã kiểm thử để tái lập chính xác hơn. [Multi-stage build guidance](https://docs.docker.com/build/building/multi-stage/)
 
 `NEXT_PUBLIC_API_BASE_URL` để rỗng **khi build**: trình duyệt gọi `/api/urls` trên cùng origin Nginx. Không đưa `http://backend:8000` vào JS vì browser trên máy người dùng không phân giải được hostname nội bộ Docker. `NEXT_PUBLIC_*` được đóng vào bundle lúc build; đặt lại env khi chạy Nginx không sửa bundle đã build. [Next.js environment variables](https://nextjs.org/docs/app/guides/environment-variables)
 
@@ -802,12 +872,14 @@ Tạo `frontend/nginx.conf`:
 server {
     listen 8080;
     server_name _;
+
     root /usr/share/nginx/html;
     index index.html;
 
     resolver 127.0.0.11 valid=10s;
     set $backend http://backend:8000;
 
+    # REST API
     location /api/ {
         proxy_pass $backend;
         proxy_set_header Host $host;
@@ -815,18 +887,28 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # Backend health
     location = /app/health {
         proxy_pass $backend;
         proxy_set_header Host $host;
     }
 
+    # Frontend static files first
+    # If no static resource exists, treat it as /{short_code}
     location / {
-        try_files $uri $uri/ =404;
+        try_files $uri $uri/ @short_redirect;
+    }
+
+    location @short_redirect {
+        proxy_pass $backend$request_uri;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
-Giữ nguyên URI `/api/urls/{short_code}` khi proxy, không thêm dấu `/` vào cuối giá trị `$backend` để cắt prefix. Resolver là DNS nội bộ Docker cho hostname backend. Route static không có fallback sang redirect `/{code}` vì ứng dụng đã đổi redirect sang `/api/urls/{code}`.
+Giữ nguyên URI `/api/urls/...` khi proxy API. Redirect dùng `/{short_code}`: `try_files` tìm static trước, sau đó chuyển sang `@short_redirect`. Resolver là DNS nội bộ Docker; `$backend$request_uri` giữ nguyên đường dẫn và query string. Không đưa hostname `backend` vào URL hiển thị cho browser.
 
 ### 8.3. Tạo compose.yaml ba service
 
@@ -937,7 +1019,7 @@ docker compose logs --tail 30 backend postgres
 docker compose --profile test run --build --rm tests
 ```
 
-Kỳ vọng test container trả exit code 0 và 2 tests OK. Mở `http://localhost:8080`; tạo URL, Go, Reset, Refresh. Link rút gọn phải bắt đầu `http://localhost:8080/api/urls/`, không phải `backend:8000` hoặc đường dẫn cũ `/{code}`.
+Kỳ vọng test container trả exit code 0 và 2 tests OK. Mở `http://localhost:8080`; tạo URL, Go, Reset, Refresh. Link rút gọn có dạng `http://localhost:8080/{short_code}`. API quản lý nằm tại `/api/urls`; browser không dùng `backend:8000`.
 
 ```powershell
 docker compose exec backend python -c "import socket; print(socket.gethostbyname('postgres'))"
@@ -1517,10 +1599,20 @@ Volume thủ công `seminar-pg-data` độc lập, không bị lệnh Compose tr
 - [Redis trên Docker](https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/docker/).
 - [PostgreSQL logical backup](https://www.postgresql.org/docs/17/backup-dump.html).
 
-### D. Phạm vi xác minh tài liệu
+### D. Phạm vi xác minh (17/11/2026)
 
-Tài liệu được đối chiếu với source dự án và tài liệu chính thức; các ví dụ Python hoàn chỉnh và hai cấu hình Compose được kiểm tra cú pháp trong quá trình soạn. Việc đọc/check cấu hình không thay thế chạy tuần tự Docker build/up/smoke trên máy trình bày. Ghi kết quả chạy thật vào nhật ký trước khi gắn từng tag; không tuyên bố các checkpoint đã pass chỉ vì file hướng dẫn được tạo.
+Đã diễn tập trên Docker Desktop và Windows PowerShell 5.1 bằng tài nguyên riêng:
+phases 1–7 (thiếu package, lifecycle, port mapping, DNS, data loss và persistence),
+phase 8 (ba service không Redis), phase 9 (MISS/HIT/fallback/invalidation/410),
+phase 10 (hai đường HTTP và CI syntax), phase 11 (recreate giữ dữ liệu).
 
-Tài liệu đã được cập nhật theo baseline local: dependency locks có hash, unit tests độc lập DB local, CI gọi Playwright đã cài, và menu tag bắt đầu bằng `seminar/00-local`. Kết quả chạy local không thay thế diễn tập Docker trên máy trình bày. Chưa xác nhận các bước build/up/smoke của toàn bộ walkthrough sau lần cập nhật này; ghi kết quả thực tế trước khi tạo tag.
+Backend 54 tests pass; frontend helper 3 pass, browser 18 pass, live browser qua
+Nginx 1 pass; HTTP smoke 2 pass trên mỗi đường backend/Nginx; Redis thật 3 pass,
+outage 1 pass. Hai workflow qua actionlint 1.7.7. Toàn bộ 16 PowerShell files được
+parse và kiểm tra liệt kê bước; helper có self-check cho skip, command failure và
+giữ image dùng chung. Reset đã thử trên tài nguyên verify, không reset DB demo gốc.
 
-Kiểm tra bản cập nhật: 2 code block Python và 59 code block PowerShell parse thành công; hai cấu hình Compose qua `docker compose config --quiet`; 12 tag trong tài liệu khớp đúng thứ tự menu; snapshot `ci.yml` khớp workflow hiện có. Đã thử chọn `seminar/00-local` và trường hợp thiếu tag trong repository tạm, không chuyển nhánh dự án thật.
+Không tuyên bố đã chạy hosted GitHub Actions, push registry hay deploy. Phase 0
+local init/CRUD chưa chạy lại trên DB cá nhân; test tương đương đã chạy qua Docker.
+Không xóa base image dùng chung để giả lập cold build. Các image tag vẫn mutable.
+Báo cáo tiếng Anh chi tiết: [seminar-checkpoints.md](docs/seminar-checkpoints.md).

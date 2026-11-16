@@ -207,3 +207,178 @@ docker volume inspect seminar-pg-data
 docker exec seminar-pg pg_dump -U shortener_user -d url_shortener -f /tmp/seminar.sql
 docker cp seminar-pg:/tmp/seminar.sql ./seminar-backup.sql
 ```
+
+# 08: Docker Compse and frontend container
+- Update backend image that have runtime and test target
+```Dockerfile
+FROM python:3.12-slim AS base
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+COPY requirements.txt ./
+RUN python -m pip install --no-cache-dir --require-hashes --only-binary=:all: -r requirements.txt
+COPY app ./app
+
+FROM base AS test
+COPY tests ./tests
+CMD ["python", "tests/smoke_api.py"]
+
+FROM base AS runtime
+RUN useradd --create-home --uid 10001 appuser
+USER appuser
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+- Build frontend Next.js, serve with Nginx
+```Dockerfile
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY . .
+ENV NEXT_PUBLIC_API_BASE_URL=""
+RUN npm run build 
+
+FROM nginxinc/nginx-unpriviledged:stable-alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/out /usr/share/nginx/html
+USER 101:101
+EXPOSE 8080
+```
+- Create nginx.conf 
+```nginx
+server {
+    listen 8080;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    resolver 127.0.0.11 valid=10s;
+    set $backend http://backend:8000;
+
+    # REST API
+    location /api/ {
+        proxy_pass $backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Backend health
+    location = /app/health {
+        proxy_pass $backend;
+        proxy_set_header Host $host;
+    }
+
+    # Frontend static files first
+    # If no static resource exists, treat it as /{short_code}
+    location / {
+        try_files $uri $uri/ @short_redirect;
+    }
+
+    location @short_redirect {
+        proxy_pass $backend$request_uri;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+- Add compose.yaml
+```yaml
+name: url-shortener-seminar
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-shortener_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shortener_password}
+      POSTGRES_DB: ${POSTGRES_DB:-url_shortener}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks: [data]
+
+  backend:
+    image: url-shortener-backend:seminar
+    build:
+      context: ./backend
+      target: runtime
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-shortener_user}:${POSTGRES_PASSWORD:-shortener_password}@postgres:5432/${POSTGRES_DB:-url_shortener}
+      REDIS_URL: ""
+      CACHE_TTL_SECONDS: "3600"
+      BASE_URL: http://localhost:8080
+      CORS_ORIGINS: http://localhost:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/app/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    networks: [edge, data]
+
+  frontend:
+    image: url-shortener-frontend:seminar
+    build: ./frontend
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [edge]
+
+  tests:
+    profiles: [test]
+    build:
+      context: ./backend
+      target: test
+    environment:
+      SMOKE_BASE_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [edge]
+
+volumes:
+  pg_data:
+
+networks:
+  edge:
+  data:
+    internal: true
+```
+- Service `tests` is temporary for testing. In this part, there are just 3 service db, backend and frontend
+- Add `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` to .env
+- Run and test:
+```powershell
+# Stop manual backend and posgres containers
+docker stop seminar-backend seminar-pg
+# Check configuration
+docker compose config --quiet
+# Build docker compose
+docker compose up -d --build --wait
+# Check for running images
+docker compose ps
+# Check for logs
+docker compose logs --tail 30 backend postgres
+# Run tests
+docker compose --profile test run --build --rm tests
+```

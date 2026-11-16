@@ -92,3 +92,12 @@ Wait-Pg seminar-pg
 docker logs --tail 30 seminar-pg
 docker exec seminar-pg psql -U shortener_user -d url_shortener -c '\d urls'
 ```
+
+## 5.5. Login, tag, and push container to DockerHub
+```powershell
+docker login
+docker tag url-shortener-backend:p03 YOUR_DOCKERHUB_USER/url-shortener-backend:p03
+docker push YOUR_DOCKERHUB_USER/url-shortener-backend:p03
+```
+
+# 6.

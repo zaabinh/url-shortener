@@ -74,17 +74,17 @@ def test_cache_miss_hit_and_delete_invalidation(client, db, monkeypatch):
     cache = MagicMock()
     cache.get.return_value = None
     monkeypatch.setattr(cache_service, "_client", cache)
-    assert client.get("/api/urls/taken", follow_redirects=False).status_code == 302
+    assert client.get("/taken", follow_redirects=False).status_code == 302
     args, kwargs = cache.set.call_args
     assert args == ("url:taken", "https://example.com/original")
     assert 0 < kwargs["ex"] <= 90
     cache.get.return_value = "https://example.com/original"
-    assert client.get("/api/urls/taken", follow_redirects=False).status_code == 302
+    assert client.get("/taken", follow_redirects=False).status_code == 302
     assert cache.set.call_count == 1
     assert db.scalar(select(Url.click_count)) == 2
     assert client.delete("/api/urls/taken").status_code == 204
     cache.delete.assert_called_with("url:taken")
-    assert client.get("/api/urls/taken", follow_redirects=False).status_code == 404
+    assert client.get("/taken", follow_redirects=False).status_code == 404
 
 
 def test_stale_cache_cannot_redirect_a_reused_code(client, db, monkeypatch):
@@ -92,7 +92,7 @@ def test_stale_cache_cannot_redirect_a_reused_code(client, db, monkeypatch):
     cache = MagicMock()
     cache.get.return_value = "https://old.example/deleted-record"
     monkeypatch.setattr(cache_service, "_client", cache)
-    response = client.get("/api/urls/taken", follow_redirects=False)
+    response = client.get("/taken", follow_redirects=False)
     assert response.headers["location"] == "https://example.com/original"
     cache.set.assert_called_once()
 
@@ -104,9 +104,9 @@ def test_redis_failures_fall_back_to_database(client, db, monkeypatch, method):
     cache.get.return_value = None
     getattr(cache, method).side_effect = redis.ConnectionError("unavailable")
     monkeypatch.setattr(cache_service, "_client", cache)
-    assert client.get("/api/urls/taken", follow_redirects=False).status_code == 302
+    assert client.get("/taken", follow_redirects=False).status_code == 302
     assert client.delete("/api/urls/taken").status_code == 204
-    assert client.get("/api/urls/taken", follow_redirects=False).status_code == 404
+    assert client.get("/taken", follow_redirects=False).status_code == 404
 
 
 def test_cached_expired_record_does_not_redirect(client, db, monkeypatch):
@@ -114,7 +114,7 @@ def test_cached_expired_record_does_not_redirect(client, db, monkeypatch):
     cache = MagicMock()
     cache.get.return_value = "https://example.com/original"
     monkeypatch.setattr(cache_service, "_client", cache)
-    assert client.get("/api/urls/taken", follow_redirects=False).status_code == 410
+    assert client.get("/taken", follow_redirects=False).status_code == 410
     cache.delete.assert_called_with("url:taken")
     assert db.scalar(select(Url.click_count)) == 0
 
@@ -125,7 +125,7 @@ def test_zero_ttl_disables_cache_writes(client, db, monkeypatch):
     cache.get.return_value = None
     monkeypatch.setattr(cache_service, "_client", cache)
     monkeypatch.setattr(settings, "cache_ttl_seconds", 0)
-    assert client.get("/api/urls/taken", follow_redirects=False).status_code == 302
+    assert client.get("/taken", follow_redirects=False).status_code == 302
     cache.set.assert_not_called()
 
 

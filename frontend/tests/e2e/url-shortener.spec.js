@@ -8,7 +8,7 @@ const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:8080';
 function makeUrl(shortCode, overrides = {}) {
     return {
         short_code: shortCode,
-        short_url: `${BASE_URL}/api/urls/${shortCode}`,
+        short_url: `${BASE_URL}/${shortCode}`,
         original_url: 'https://example.com/long-link',
         click_count: 0,
         expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
@@ -48,7 +48,7 @@ async function mockApi(page, initialUrls = []) {
             const body = request.postDataJSON();
             requests.creates.push(body);
             const created = makeUrl(`code${requests.creates.length}`, {
-                short_url: `${new URL(request.url()).origin}/api/urls/code${requests.creates.length}`,
+                short_url: `${new URL(request.url()).origin}/code${requests.creates.length}`,
                 original_url: body.original_url,
                 expires_at: body.expires_at,
             });
@@ -84,7 +84,7 @@ test('creates a short URL and sends expiration in UTC', async ({ page }) => {
 
     await page.getByRole('button', { name: 'Shorten it!' }).click();
 
-    await expect(page.getByText(`${BASE_URL}/api/urls/code1`)).toBeVisible();
+    await expect(page.getByText(`${BASE_URL}/code1`)).toBeVisible();
     const expectedExpiration = await page.evaluate((value) => new Date(value).toISOString(), expirationValue);
     expect(requests.creates).toHaveLength(1);
     expect(requests.creates[0]).toEqual({
@@ -134,17 +134,17 @@ test('refreshes the recent URL list after a successful create', async ({ page })
     await page.getByRole('button', { name: 'Shorten it!' }).click();
 
     await expect.poll(() => requests.lists).toBe(2);
-    await expect(page.getByText(`${BASE_URL}/api/urls/code1`)).toBeVisible();
+    await expect(page.getByText(`${BASE_URL}/code1`)).toBeVisible();
 });
 
 test('deletes a recent short URL', async ({ page }) => {
     const { requests } = await mockApi(page, [makeUrl('delete-me')]);
     await page.goto('/');
-    await expect(page.getByText(`${BASE_URL}/api/urls/delete-me`)).toBeVisible();
+    await expect(page.getByText(`${BASE_URL}/delete-me`)).toBeVisible();
     await page.getByRole('button', { name: 'Delete' }).click();
     await page.getByRole('button', { name: 'Yes' }).click();
 
-    await expect(page.getByText(`${BASE_URL}/api/urls/delete-me`)).toHaveCount(0);
+    await expect(page.getByText(`${BASE_URL}/delete-me`)).toHaveCount(0);
     expect(requests.deletes).toEqual(['delete-me']);
 });
 
@@ -179,15 +179,15 @@ test('requires reset before creating another mapping', async ({ page }) => {
     const { requests } = await mockApi(page);
     await openForm(page);
     await page.getByRole('button', { name: 'Shorten it!' }).click();
-    await expect(page.getByText(`${BASE_URL}/api/urls/code1`)).toBeVisible();
+    await expect(page.getByText(`${BASE_URL}/code1`)).toBeVisible();
 
     await page.getByRole('button', { name: 'Delete' }).click();
     await page.getByRole('button', { name: 'Yes' }).click();
-    await expect(page.getByText(`${BASE_URL}/api/urls/code1`)).toHaveCount(0);
+    await expect(page.getByText(`${BASE_URL}/code1`)).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Expand it!' }).click();
     await page.getByRole('button', { name: 'Shorten it!' }).click();
-    await expect(page.getByLabel('Paste your URL')).toHaveValue(`${BASE_URL}/api/urls/code1`);
+    await expect(page.getByLabel('Paste your URL')).toHaveValue(`${BASE_URL}/code1`);
     expect(requests.creates).toHaveLength(1);
 
     await page.getByRole('button', { name: 'Reset', exact: true }).click();
@@ -196,7 +196,7 @@ test('requires reset before creating another mapping', async ({ page }) => {
     await page.getByLabel('Paste your URL').fill('https://example.com/another');
     await setFutureExpiration(page);
     await page.getByRole('button', { name: 'Shorten it!' }).click();
-    await expect(page.getByText(`${BASE_URL}/api/urls/code2`)).toBeVisible();
+    await expect(page.getByText(`${BASE_URL}/code2`)).toBeVisible();
 
     expect(requests.creates).toHaveLength(2);
     expect(requests.deletes).toEqual(['code1']);
@@ -292,11 +292,11 @@ test('maps list and delete timeout errors to retryable messages', async () => {
 test('refreshes cards and exposes Go and Back to top navigation', async ({ page }) => {
     const { requests, urls } = await mockApi(page, [makeUrl('visit')]);
     await page.goto('/');
-    await expect(page.getByRole('link', { name: 'Go to https://example.com/long-link' })).toHaveAttribute('href', `${BASE_URL}/api/urls/visit`);
+    await expect(page.getByRole('link', { name: 'Go to https://example.com/long-link' })).toHaveAttribute('href', `${BASE_URL}/visit`);
     await expect(page.getByRole('link', { name: 'Back to top' })).toHaveCount(0);
     urls.push(makeUrl('refreshed'));
     await page.locator('.refresh-button').click();
-    await expect(page.getByText(`${BASE_URL}/api/urls/refreshed`)).toBeVisible();
+    await expect(page.getByText(`${BASE_URL}/refreshed`)).toBeVisible();
     expect(requests.lists).toBeGreaterThanOrEqual(2);
     await page.getByRole('link', { name: 'Recent URLs', exact: true }).click();
     const back = page.getByRole('link', { name: 'Back to top' });

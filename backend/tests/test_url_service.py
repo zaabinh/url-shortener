@@ -131,6 +131,7 @@ def test_redis_failures_fall_back_to_database(client, db, monkeypatch, method):
     getattr(cache, method).side_effect = redis.ConnectionError("unavailable")
     monkeypatch.setattr(cache_service, "_client", cache)
     assert client.get("/taken", follow_redirects=False).status_code == 302
+    assert db.scalar(select(Url.click_count)) == 1
     assert client.delete("/api/urls/taken").status_code == 204
     assert client.get("/taken", follow_redirects=False).status_code == 404
 

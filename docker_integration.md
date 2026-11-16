@@ -991,7 +991,7 @@ flowchart TD
 
 ### 9.2. Sử dụng luồng cache hiện có
 
-Không cần thay router, schema hay service ở bước này. `backend/app/api/urls.py` đã gọi `url_service.resolve_short_code` và `url_service.delete_url`; giữ nguyên validation, `responses` OpenAPI, status 302/404/410 và header `Cache-Control`.
+Không cần thay router, schema hay service ở bước này. `backend/app/api/redirect.py` gọi `url_service.resolve_short_code`; `backend/app/api/urls.py` gọi `url_service.delete_url`. Giữ nguyên validation, `responses` OpenAPI, status 302/404/410 và header `Cache-Control`.
 
 - Cache MISS: SQL `UPDATE ... WHERE expires_at > now RETURNING original_url, expires_at` vừa tăng click vừa lấy destination hiện hành.
 - Cache HIT: SQL UPDATE chỉ thành công nếu URL chưa hết hạn và destination khớp cache. Nếu không khớp, loại key cũ rồi kiểm tra lại DB.
@@ -1038,6 +1038,8 @@ services:
 
   backend:
     image: url-shortener-backend:seminar
+    # Socket timeouts do not limit hostname resolution when Redis is stopped.
+    dns_opt: ["timeout:1", "attempts:1"]
     build:
       context: ./backend
       target: runtime
@@ -1045,8 +1047,8 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-shortener_user}:${POSTGRES_PASSWORD:-shortener_password}@postgres:5432/${POSTGRES_DB:-url_shortener}
       REDIS_URL: redis://redis:6379/0
       CACHE_TTL_SECONDS: "3600"
-      BASE_URL: http://localhost:8080
-      CORS_ORIGINS: http://localhost:8080
+      BASE_URL: http://localhost:${SEMINAR_HTTP_PORT:-8080}
+      CORS_ORIGINS: http://localhost:${SEMINAR_HTTP_PORT:-8080}
     depends_on:
       postgres:
         condition: service_healthy
@@ -1063,7 +1065,7 @@ services:
   frontend:
     image: url-shortener-frontend:seminar
     build: ./frontend
-    ports: ["127.0.0.1:8080:8080"]
+    ports: ["127.0.0.1:${SEMINAR_HTTP_PORT:-8080}:8080"]
     depends_on:
       backend:
         condition: service_healthy
@@ -1076,15 +1078,18 @@ services:
 
   tests:
     profiles: [test]
+    dns_opt: ["timeout:1", "attempts:1"]
     build:
       context: ./backend
       target: test
     environment:
       SMOKE_BASE_URL: http://backend:8000
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-shortener_user}:${POSTGRES_PASSWORD:-shortener_password}@postgres:5432/${POSTGRES_DB:-url_shortener}
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       backend:
         condition: service_healthy
-    networks: [edge]
+    networks: [edge, data]
 
 volumes:
   pg_data:
@@ -1111,7 +1116,7 @@ Chạy trong PowerShell ở root:
 ```powershell
 $demoPayload = @{
     original_url = 'https://example.com/docker-cache'
-    expires_at = [DateTimeOffset]::UtcNow.AddMinutes(10).ToString('o')
+    expires_at = [DateTimeOffset]::UtcNow.AddDays(1).ToString('o')
 } | ConvertTo-Json
 $demoUrl = Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/urls -ContentType 'application/json' -Body $demoPayload
 $shortCode = $demoUrl.short_code
@@ -1123,7 +1128,7 @@ docker compose exec redis redis-cli GET "url:$shortCode"
 docker compose exec redis redis-cli TTL "url:$shortCode"
 ```
 
-Kỳ vọng HTTP 302, log `Cache MISS`, `Query PostgreSQL`, `Cached`; GET key trả destination, TTL dương và không quá 600 giây trong ví dụ này.
+Kỳ vọng HTTP 302, log `Cache MISS`, `Query PostgreSQL`, `Cached`; GET key trả destination, TTL dương và không quá 3600 giây theo cấu hình cache. Link còn hạn một ngày để có thể dừng thuyết trình.
 
 ```powershell
 curl.exe -s -o NUL -w '%{http_code}' "http://localhost:8080/$shortCode"
@@ -1147,12 +1152,38 @@ Kỳ vọng 302 và warning Redis unavailable; PostgreSQL vẫn hoạt động. 
 ### 9.6. Invalidation và expiration
 
 ```powershell
-Invoke-RestMethod -Method Delete -Uri "http://localhost:8080/$shortCode"
+Invoke-RestMethod -Method Delete -Uri "http://localhost:8080/api/urls/$shortCode"
 docker compose exec redis redis-cli EXISTS "url:$shortCode"
 curl.exe -s -o NUL -w '%{http_code}' "http://localhost:8080/$shortCode"
 ```
 
-Kỳ vọng EXISTS = 0 và GET = 404. Để chứng minh TTL/hết hạn, tạo một link mới với `AddSeconds(5)`, GET ngay để warm cache, chờ ít nhất 6 giây rồi GET lại: 410. Chạy smoke tests lần nữa để kiểm tra regression sau khi nối cache.
+Kỳ vọng EXISTS = 0 và GET = 404. `GET /{short_code}` là redirect, còn `DELETE /api/urls/{short_code}` là quản lý URL.
+
+Để chứng minh TTL/hết hạn, tạo một link mới với `AddSeconds(8)`, GET ngay để warm cache, chờ qua `expires_at` rồi GET lại: 410. Không dừng thuyết trình giữa lúc tạo và warm link ngắn hạn. Click count chỉ tăng cho 302, không tăng cho 404/410. Demo fallback dùng link mới còn hạn một ngày để tránh nhầm hết hạn với lỗi Redis.
+
+Script có điểm dừng và assertion cho toàn bộ phase 9:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/seminar/09-redis.ps1
+# Bắt đầu trực tiếp từ 9.6; bước 5 và 6 tự tạo dữ liệu mới.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/seminar/09-redis.ps1 -FromStep 5
+```
+
+Chạy test cache thật sau khi stack healthy và test image đã build:
+
+```powershell
+docker compose --profile test build tests
+docker compose --profile test run --rm --no-deps tests python tests/docker_cache.py
+docker compose stop redis
+try {
+    docker compose --profile test run --rm --no-deps tests python tests/docker_cache.py --fallback
+    if ($LASTEXITCODE -ne 0) { throw 'Redis fallback checks failed' }
+} finally {
+    docker compose start redis
+}
+```
+
+`--no-deps` giữ nguyên trạng thái Redis đã stop; không dùng `compose up` trong phép thử fallback. Test thường kiểm tra MISS/HIT, TTL, invalidation, stale cache và 410 không tăng click; test `--fallback` kiểm tra 302/click/delete khi Redis thật bị tắt. Các test chỉ xóa bản ghi/key vừa tạo.
 
 Không dùng `FLUSHALL` cho demo: chỉ `DEL` key do mình vừa tạo. Redis mất cache không được làm mất bản ghi trong PostgreSQL.
 

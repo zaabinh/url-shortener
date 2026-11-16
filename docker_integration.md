@@ -604,7 +604,7 @@ docker network connect seminar-net seminar-pg
 Sửa **file riêng** `backend/.env.docker`:
 
 ```dotenv
-DATABASE_URL=postgresql+psycopg://shortener_user:shortener_password@seminar-pg:5432/url_shortener
+DATABASE_URL=postgresql+psycopg:/shortener_user:shortener_password@seminar-pg:5432/url_shortener
 REDIS_URL=
 BASE_URL=http://localhost:8001
 CORS_ORIGINS=http://localhost:3000

@@ -44,7 +44,7 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 - `docker inspect` to inspect image status
 - `docker stop` / `docker start`
 
-# 4. Port mapping
+# 04: Port mapping
 - Use `curl.exe --max-time 3 http://localhost:8001/app/health` to ping to running backend container (since .env.docker configure backend BASE_URL to localhost:8001 to distinguish with local backend port)
 - Stop and remove current backend container
 - Create new container with port mapping
@@ -64,7 +64,7 @@ Remove-Item Env:SMOKE_BASE_URL
 ```
 - **NOTE:** Since `DATABASE_URL` host is set to host.docker.internal so Docker backend can connect to running PostgresSQL database on local device
 
-# 5. Registry and PostgreSQL container
+# 05: Registry and PostgreSQL container
 
 - Registry is the place containing images which can be private/public. DockerHub is a cloud-based registy where developers push and pull images and container (Like GitHub)
 - Pull postgres image instead of create a new one
@@ -108,7 +108,7 @@ docker tag url-shortener-backend:p03 YOUR_DOCKERHUB_USER/url-shortener-backend:p
 docker push YOUR_DOCKERHUB_USER/url-shortener-backend:p03
 ```
 
-# 6. Docker Network
+# 06: Docker Network
 - For the containers to communicate with each other through localhost, we should configure a Docker Network
 - Create network
 ```powershell
@@ -144,4 +144,66 @@ docker network inspect seminar-net
 $env:SMOKE_BASE_URL = 'http://localhost:8001'
 backend/.venv/Scripts/python.exe backend/tests/smoke_api.py
 Remove-Item Env:SMOKE_BASE_URL
+```
+# 07: Docker volume
+- Example: Recreate db container with Docker Volume to store data even container is removed
+```powershell
+# Remove container
+docker stop seminar-pg
+docker rm -v seminar-pg
+# Create volume 
+docker volume create seminar-pg-data
+# Recreate container
+$initSql = (Resolve-Path docker/postgres/init.sql).Path
+docker run -d --name seminar-pg --network seminar-net `
+  -e POSTGRES_USER=shortener_user `
+  -e POSTGRES_PASSWORD=shortener_password `
+  -e POSTGRES_DB=url_shortener `
+  -p 127.0.0.1:5433:5432 `
+  # Assign created volume to store data
+  --mount type=volume,source=seminar-pg-data,target=/var/lib/postgresql/data `
+  --mount "type=bind,source=$initSql,target=/docker-entrypoint-initdb.d/001-init.sql,readonly" `
+  postgres:17-alpine
+Wait-Pg seminar-pg
+# Add example data
+docker exec seminar-pg psql -U shortener_user -d url_shortener -c "INSERT INTO urls (id,short_code,original_url,expires_at) VALUES ('22222222-2222-4222-8222-222222222222','persistent-demo','https://example.com',NOW()+INTERVAL '1 day');"
+# Remove container
+docker stop seminar-pg
+docker rm seminar-pg
+```
+
+- Then, recreate the container again with that volume
+```powershell
+docker run -d --name seminar-pg --network seminar-net `
+  -e POSTGRES_USER=shortener_user `
+  -e POSTGRES_PASSWORD=shortener_password `
+  -e POSTGRES_DB=url_shortener `
+  -p 127.0.0.1:5433:5432 `
+  --mount type=volume,source=seminar-pg-data,target=/var/lib/postgresql/data `
+  --mount "type=bind,source=$initSql,target=/docker-entrypoint-initdb.d/001-init.sql,readonly" `
+  postgres:17-alpine
+```
+
+- Check that old data remains
+
+```powershell
+Wait-Pg seminar-pg
+docker exec seminar-pg psql -U shortener_user -d url_shortener -c "SELECT short_code FROM urls WHERE short_code='persistent-demo';"
+docker start seminar-backend
+docker volume inspect seminar-pg-data
+```
+| Concept | In practice |
+|---|---|
+| Writable layer | File created filesystem container, removed with container |
+| Anonymous volume | Docker names it randomly, difficult to restore |
+| Named volume | Re-integrate with new container by name |
+| Bind mount | init.sql on host mounted read-only into container |
+
+- CAUTION: Named volume is not wrapped with image when image pulled to another machine, so volume cannot replace backup. 
+  - Volume keep **live data** remains when restart or recreate containers. For example, you can restart backend containers to update code and recover the data you are working on with volume, and if you delete tables or records, you can't restore them.
+  - Backup save and restore **data** when system encounter an error that lead to lost data, or you just simply need to change the machine.
+- Create backup data saved
+```powershell
+docker exec seminar-pg pg_dump -U shortener_user -d url_shortener -f /tmp/seminar.sql
+docker cp seminar-pg:/tmp/seminar.sql ./seminar-backup.sql
 ```

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, useLayoutEffect } from 'react';
 import { shortenUrl } from '../lib/api';
 
 function toLocalDateTimeInputValue(date) {
@@ -32,6 +32,7 @@ export default function UrlForm({ onCreated }) {
     const formRef = useRef(null);
     const controlRef = useRef(null);
     const fieldSpaceRef = useRef(null);
+    const measureRef = useRef(null);
     const pair = useRef(null);
     const drag = useRef(null);
     const suppressClick = useRef(false);
@@ -156,6 +157,39 @@ export default function UrlForm({ onCreated }) {
         event.currentTarget.setPointerCapture(event.pointerId);
     }
 
+    useLayoutEffect(() => {
+        const space = fieldSpaceRef.current;
+        const control = controlRef.current;
+        const input = control?.querySelector('#url');
+        const button = control?.querySelector('.url-toggle');
+        const measure = measureRef.current;
+        if (!space || !control || !input || !button || !measure) return undefined;
+
+        const px = (style, property) => Number.parseFloat(style[property]) || 0;
+
+        function updateWidth() {
+            const inputStyle = getComputedStyle(input);
+            const controlStyle = getComputedStyle(control);
+            measure.style.font = inputStyle.font;
+            measure.style.letterSpacing = inputStyle.letterSpacing;
+
+            const inputExtra = px(inputStyle, 'paddingLeft') + px(inputStyle, 'paddingRight')
+                + px(inputStyle, 'borderLeftWidth') + px(inputStyle, 'borderRightWidth');
+            const controlExtra = px(controlStyle, 'paddingLeft') + px(controlStyle, 'paddingRight')
+                + px(controlStyle, 'borderLeftWidth') + px(controlStyle, 'borderRightWidth')
+                + px(controlStyle, 'columnGap');
+            const wanted = measure.getBoundingClientRect().width + inputExtra
+                + button.getBoundingClientRect().width + controlExtra + 2;
+
+            setCompactWidth(Math.min(space.clientWidth, Math.ceil(wanted)));
+        }
+
+        updateWidth();
+        const observer = new ResizeObserver(updateWidth);
+        observer.observe(space);
+        return () => observer.disconnect();
+    }, [value, busy]);
+
     function handlePointerMove(event) {
         const current = drag.current;
         if (!current || event.pointerId !== current.id) return;
@@ -207,7 +241,10 @@ export default function UrlForm({ onCreated }) {
                     ref={controlRef}
                     className={dragging ? 'url-control is-dragging' : 'url-control'}
                     data-mode={mode}
-                    style={dragging ? { '--drag-width': `${dragWidth}px` } : undefined}
+                    style={{
+                        '--compact-width': compactWidth == null ? undefined : `${compactWidth}px`,
+                        '--drag-width': dragging ? `${dragWidth}px` : undefined,
+                    }}
                 >
                     <input
                         type="url"
@@ -236,6 +273,9 @@ export default function UrlForm({ onCreated }) {
                         <span className="toggle-label">{label}</span>
                     </button>
                 </div>
+                <span ref={measureRef} className="url-measure" aria-hidden="true">
+                    {value || 'https://example.com/your-long-link'}
+                </span>
             </div>
 
             <label htmlFor="short-code">Custom short code (optional)</label>
@@ -294,6 +334,7 @@ export default function UrlForm({ onCreated }) {
                     >{label}</button>
                 ))}
             </fieldset>
+
             <p id="url-hint" className="url-hint">Pull the button left to shorten. Stretch it right to expand. Or click to switch.</p>
             {mode === 'short' && pair.current?.short === value && (
                 <button

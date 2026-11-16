@@ -1,6 +1,6 @@
 # URL Shortener
 
-Local application using Next.js, FastAPI and PostgreSQL. Create short URLs, redirect, count clicks, set expiration, and browse recent links. Redis caching is optional.
+Local application using Next.js, FastAPI and PostgreSQL. Create short URLs with an optional custom code, redirect, count clicks, set expiration, and browse recent links. Redis caching is optional.
 
 ## Requirements
 
@@ -49,7 +49,7 @@ npm run dev
 
 Open <http://localhost:3000>. frontend/.env.development sets the API to http://localhost:8000. Override it in frontend/.env.local if needed and restart Next.js after changing environment variables.
 
-The form supports expiration presets, Shorten/Expand, and Reset. After creation, Shorten/Expand only toggles the displayed URL; use Reset to create another link. Recent URLs includes Refresh, pagination, Copy, Go, and Delete. Back to top appears when scrolling to the list.
+The form supports an optional 1-32 character alphanumeric custom code, expiration presets, Shorten/Expand, and Reset. After shortening, the URL control fits its text and padding while staying inside the form; expanding restores full width. After creation, Shorten/Expand only toggles the displayed URL; use Reset to create another link. Recent URLs includes Refresh, pagination, Copy, Go, and Delete. Back to top appears when scrolling to the list.
 
 ## API and configuration
 
@@ -58,12 +58,12 @@ Swagger: <http://localhost:8000/docs>.
 | Method | Endpoint | Result |
 |---|---|---|
 | GET | /app/health | 200, `{"status":"healthy"}`; application liveness only |
-| POST | /api/urls | 201; accepts original_url and optional expires_at |
+| POST | /api/urls | 201; accepts original_url, optional expires_at and optional short_code |
 | GET | /api/urls?limit=20&offset=0 | Newest links first; limit 1-100 |
-| GET | /api/urls/{short_code} | 302; missing 404, expired 410 |
+| GET | /{short_code} | 302; missing 404, expired 410 |
 | DELETE | /api/urls/{short_code} | 204; missing 404 |
 
-Only HTTP/HTTPS destinations up to 2048 characters are accepted. Explicit expiration must include a timezone and be in the future; omitted expiration defaults to 30 days. Clicks increase only on successful redirects. Redis errors fall back to PostgreSQL; database failures return 503.
+Only HTTP/HTTPS destinations up to 2048 characters are accepted. A custom short code is trimmed, case-sensitive, and must contain 1-32 ASCII letters or digits; `api`, `app`, `docs`, and `redoc` are reserved. Blank input generates a random code, while an existing code returns 409. Explicit expiration must include a timezone and be in the future; omitted expiration defaults to 30 days. Clicks increase only on successful redirects. Redis errors fall back to PostgreSQL; database failures return 503.
 
 Backend reads backend/.env. Process environment variables override file values.
 
@@ -106,7 +106,7 @@ npm run test:e2e
 
 On macOS/Linux use .venv/bin/python and `NEXT_PUBLIC_API_BASE_URL='' npm run build`.
 
-See [database design](docs/DATABASE_DESIGN.md) and [backend fixes](docs/BACKEND_FIXES.md). The archive/docker-seminar branch preserves the guide and configuration for the next seminar stages; this local milestone runs without Docker.
+See the [test catalog](docs/test/README.md), [database design](docs/DATABASE_DESIGN.md), [backend fixes](docs/BACKEND_FIXES.md), and the [Docker seminar walkthrough](docker_integration.md). Docker work continues on feature/docker, starting at seminar/00-local; use scripts/switch-tag.ps1 to select an existing checkpoint. Docker files are introduced at their respective stages; the baseline runs locally.
 
 ## Updating dependency locks
 

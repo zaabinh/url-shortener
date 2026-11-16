@@ -966,17 +966,23 @@ git tag -a seminar/08-compose -m "Three-service application runs from Compose"
 
 ```mermaid
 flowchart TD
-    A[GET /api/urls/code] --> B{Redis có key?}
-    B -- Không: MISS --> C[UPDATE chưa hết hạn, tăng click và RETURNING mapping]
-    C --> D{Tồn tại và chưa hết hạn?}
-    D -- Không --> E[404 hoặc 410]
-    D -- Có --> F[Lưu Redis với TTL]
-    B -- Có: HIT --> G[SQL UPDATE click nếu link còn hiệu lực]
-    G --> H{UPDATE được một hàng?}
-    H -- Có --> I[302 với destination từ Redis]
-    H -- Không --> J[Xóa key cũ rồi kiểm tra DB]
-    J --> C
-    F --> I
+    A[GET /code] --> B{Redis Cache}
+
+    B -- HIT --> C[Increment click count in DB]
+    C --> D{DB update succeeded?}
+
+    D -- Yes --> E[302 Redirect<br/>using cached destination]
+    D -- No --> F[Delete stale cache]
+    F --> G[Fallback to DB]
+
+    B -- MISS --> G
+
+    G --> H[Query valid link in DB<br/>+ increment click count]
+    H --> I{Valid link found?}
+
+    I -- No --> J[404 / 410]
+    I -- Yes --> K[Store destination in Redis<br/>with TTL]
+    K --> E
 ```
 
 Đây là cache-aside với TTL: DB là nguồn dữ liệu chính; cache có thể xóa và dựng lại. [Redis cache-aside](https://redis.io/docs/latest/develop/use-cases/cache-aside/)
@@ -1111,7 +1117,7 @@ $demoUrl = Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/urls -C
 $shortCode = $demoUrl.short_code
 
 docker compose exec redis redis-cli DEL "url:$shortCode"
-curl.exe -s -o NUL -w '%{http_code}' "http://localhost:8080/api/urls/$shortCode"
+curl.exe -s -o NUL -w '%{http_code}' "http://localhost:8080/$shortCode"
 docker compose logs --since 1m backend
 docker compose exec redis redis-cli GET "url:$shortCode"
 docker compose exec redis redis-cli TTL "url:$shortCode"
@@ -1120,7 +1126,7 @@ docker compose exec redis redis-cli TTL "url:$shortCode"
 Kỳ vọng HTTP 302, log `Cache MISS`, `Query PostgreSQL`, `Cached`; GET key trả destination, TTL dương và không quá 600 giây trong ví dụ này.
 
 ```powershell
-curl.exe -s -o NUL -w '%{http_code}' "http://localhost:8080/api/urls/$shortCode"
+curl.exe -s -o NUL -w '%{http_code}' "http://localhost:8080/$shortCode"
 docker compose logs --since 1m backend
 docker compose exec postgres psql -U shortener_user -d url_shortener -c "SELECT short_code,click_count FROM urls WHERE short_code='$shortCode';"
 ```
@@ -1131,7 +1137,7 @@ Lần hai vẫn HTTP 302, có log `Cache HIT`; click_count = 2 nếu chỉ hai r
 
 ```powershell
 docker compose stop redis
-curl.exe -s -o NUL -w '%{http_code}' "http://localhost:8080/api/urls/$shortCode"
+curl.exe -s -o NUL -w '%{http_code}' "http://localhost:8080/$shortCode"
 docker compose logs --since 1m backend
 docker compose start redis
 ```
@@ -1141,9 +1147,9 @@ Kỳ vọng 302 và warning Redis unavailable; PostgreSQL vẫn hoạt động. 
 ### 9.6. Invalidation và expiration
 
 ```powershell
-Invoke-RestMethod -Method Delete -Uri "http://localhost:8080/api/urls/$shortCode"
+Invoke-RestMethod -Method Delete -Uri "http://localhost:8080/$shortCode"
 docker compose exec redis redis-cli EXISTS "url:$shortCode"
-curl.exe -s -o NUL -w '%{http_code}' "http://localhost:8080/api/urls/$shortCode"
+curl.exe -s -o NUL -w '%{http_code}' "http://localhost:8080/$shortCode"
 ```
 
 Kỳ vọng EXISTS = 0 và GET = 404. Để chứng minh TTL/hết hạn, tạo một link mới với `AddSeconds(5)`, GET ngay để warm cache, chờ ít nhất 6 giây rồi GET lại: 410. Chạy smoke tests lần nữa để kiểm tra regression sau khi nối cache.

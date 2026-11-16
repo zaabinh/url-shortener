@@ -1,9 +1,20 @@
+# syntax=docker/dockerfile:1
+
 FROM python:3.12-slim AS base
+
 WORKDIR /app
+
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+
 COPY requirements.txt ./
-RUN python -m pip install --no-cache-dir --require-hashes --only-binary=:all: -r requirements.txt
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install \
+    --require-hashes \
+    --only-binary=:all: \
+    -r requirements.txt
+
 COPY app ./app
 
 FROM base AS test

@@ -382,3 +382,138 @@ docker compose logs --tail 30 backend postgres
 # Run tests
 docker compose --profile test run --build --rm tests
 ```
+
+# 09: Redis
+## Redirect flow with Redis
+![Redis_redirect_flow](./architecture/architecture.png)
+## New compose.yaml:
+```yaml
+name: url-shortener-seminar
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-shortener_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shortener_password}
+      POSTGRES_DB: ${POSTGRES_DB:-url_shortener}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks: [data]
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+    networks: [data]
+
+  backend:
+    image: url-shortener-backend:seminar
+    build:
+      context: ./backend
+      target: runtime
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-shortener_user}:${POSTGRES_PASSWORD:-shortener_password}@postgres:5432/${POSTGRES_DB:-url_shortener}
+      REDIS_URL: redis://redis:6379/0
+      CACHE_TTL_SECONDS: "3600"
+      BASE_URL: http://localhost:8080
+      CORS_ORIGINS: http://localhost:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/app/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    networks: [edge, data]
+
+  frontend:
+    image: url-shortener-frontend:seminar
+    build: ./frontend
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [edge]
+
+  tests:
+    profiles: [test]
+    build:
+      context: ./backend
+      target: test
+    environment:
+      SMOKE_BASE_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [edge]
+
+volumes:
+  pg_data:
+
+networks:
+  edge:
+  data:
+    internal: true
+```
+
+- Rerun:
+```powershell
+docker compose config --quiet
+docker compose up -d --build --wait
+docker compose exec redis redis-cli ping
+docker compose --profile test run --build --rm tests
+```
+- Test MISS, HIT and click-count
+```powershell
+$demoPayload = @{
+    original_url = 'https://example.com/docker-cache'
+    expires_at = [DateTimeOffset]::UtcNow.AddMinutes(10).ToString('o')
+} | ConvertTo-Json
+# Call API create url
+$demoUrl = Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/urls -ContentType 'application/json' -Body $demoPayload
+$shortCode = $demoUrl.short_code
+# Remove Redis cache 1:exist, 0:no exists
+docker compose exec redis redis-cli DEL "url:$shortCode"
+# Call short url
+curl.exe -s -o NUL -w '%{http_code}' "http://localhost:8080/$shortCode"
+# Read log
+docker compose logs --since 1m backend
+# Check url menu in Redis
+docker compose exec redis redis-cli GET "url:$shortCode"
+# Check TTL
+docker compose exec redis redis-cli TTL "url:$shortCode"
+```
+- Check for click_count
+```powershell
+curl.exe -s -o NUL -w '%{http_code}' "http://localhost:8080/$shortCode"
+docker compose logs --since 1m backend
+docker compose exec postgres psql -U shortener_user -d url_shortener -c "SELECT short_code,click_count FROM urls WHERE short_code='$shortCode';"
+```
+- Redis error - fallback DB
+```powershell
+docker compose stop redis
+curl.exe -s -o NUL -w '%{http_code}' "http://localhost:8080/$shortCode"
+docker compose logs --since 1m backend
+docker compose start redis
+```

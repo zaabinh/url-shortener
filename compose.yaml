@@ -18,6 +18,16 @@ services:
       start_period: 10s
     networks: [data]
 
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+    networks: [data]
+
   backend:
     image: url-shortener-backend:seminar
     build:
@@ -25,12 +35,14 @@ services:
       target: runtime
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-shortener_user}:${POSTGRES_PASSWORD:-shortener_password}@postgres:5432/${POSTGRES_DB:-url_shortener}
-      REDIS_URL: ""
+      REDIS_URL: redis://redis:6379/0
       CACHE_TTL_SECONDS: "3600"
       BASE_URL: http://localhost:8080
       CORS_ORIGINS: http://localhost:8080
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/app/health', timeout=2)"]

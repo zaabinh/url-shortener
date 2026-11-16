@@ -1,7 +1,8 @@
-node_modules
-.next
-out
-.git
+node_modules/
+.next/
+out/
+test-results/
+playwright-report/
+coverage/
 .env*
-test-results
-playwright-report
+.git/

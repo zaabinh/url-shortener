@@ -3,11 +3,13 @@ import { test, expect } from '@playwright/test';
 test('creates a URL, redirects and deletes it', async ({ page, request }) => {
     const api = 'http://localhost:8000';
     let code;
+    const customCode = `e2e${Date.now()}`;
 
     try {
         await page.goto('/');
         await page.getByLabel('Paste your URL')
             .fill('https://example.com/e2e');
+        await page.getByLabel('Custom short code (optional)').fill(customCode);
 
         const expiration = await page.evaluate(() => {
             const date = new Date(Date.now() + 86_400_000);
@@ -29,6 +31,7 @@ test('creates a URL, redirects and deletes it', async ({ page, request }) => {
         expect(created.status()).toBe(201);
 
         code = (await created.json()).short_code;
+        expect(code).toBe(customCode);
         const shortUrl = `${api}/${code}`;
 
         await expect(page.getByLabel('Paste your URL'))

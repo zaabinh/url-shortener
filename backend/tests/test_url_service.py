@@ -45,6 +45,32 @@ def test_collision_exhaustion_is_safe_503(client, db, monkeypatch):
     assert len(generated) == url_service.MAX_ATTEMPTS
 
 
+def test_reserved_generated_code_consumes_an_attempt(db, monkeypatch):
+    codes = iter(["api", "freshcode"])
+    generated = []
+
+    def generate(_):
+        code = next(codes)
+        generated.append(code)
+        return code
+
+    monkeypatch.setattr(url_service, "generate_short_code", generate)
+    created = url_service.create_short_url(db, UrlCreate(original_url="https://example.com"))
+    assert created.short_code == "freshcode"
+    assert generated == ["api", "freshcode"]
+
+
+def test_custom_code_does_not_call_generator(db, monkeypatch):
+    generator = MagicMock(side_effect=AssertionError("generator should not run"))
+    monkeypatch.setattr(url_service, "generate_short_code", generator)
+    created = url_service.create_short_url(
+        db,
+        UrlCreate(original_url="https://example.com", short_code="chosenCode"),
+    )
+    assert created.short_code == "chosenCode"
+    generator.assert_not_called()
+
+
 def test_non_collision_integrity_error_is_not_retried():
     db = MagicMock()
     db.commit.side_effect = IntegrityError("INSERT", {}, sqlite3.IntegrityError("NOT NULL constraint failed: urls.original_url"))

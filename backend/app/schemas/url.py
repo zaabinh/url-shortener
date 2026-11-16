@@ -1,13 +1,32 @@
 from datetime import datetime, timezone
 from pydantic import BaseModel, HttpUrl, field_validator, ConfigDict, computed_field
 import uuid
+import re
 
 MAX_URL_LENGTH = 2048
+RESERVED_SHORT_CODES = {"api", "app", "docs", "redoc"}
 
 class UrlCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     original_url: HttpUrl
     expires_at: datetime | None = None
+    short_code: str | None = None
+
+    @field_validator("short_code", mode="before")
+    @classmethod
+    def validate_short_code(cls, value):
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("Short code must be a string")
+        code = value.strip()
+        if not code:
+            return None
+        if not re.fullmatch(r"[A-Za-z0-9]{1,32}", code):
+            raise ValueError("Use 1-32 ASCII letters or digits")
+        if code.lower() in RESERVED_SHORT_CODES:
+            raise ValueError("This short code is reserved")
+        return code
 
     @field_validator("original_url")
     @classmethod

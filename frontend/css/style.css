@@ -786,6 +786,17 @@ html {
     background: var(--accent-hover);
 }
 
+.short-code-input {
+    width: 100%;
+    min-width: 0;
+    padding: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 0.75rem;
+    background: var(--paper);
+    color: var(--ink);
+    font: inherit;
+}
+
 @media (max-width: 760px) {
     .hero {
         gap: 1rem;

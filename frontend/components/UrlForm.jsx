@@ -27,6 +27,8 @@ export default function UrlForm({ onCreated }) {
     const [copied, setCopied] = useState(false);
     const [status, setStatus] = useState({ message: '', error: false });
     const [dragWidth, setDragWidth] = useState(null);
+    const [compactWidth, setCompactWidth] = useState(null);
+    const [shortCode, setShortCode] = useState('');
     const formRef = useRef(null);
     const controlRef = useRef(null);
     const fieldSpaceRef = useRef(null);
@@ -46,6 +48,7 @@ export default function UrlForm({ onCreated }) {
         suppressClick.current = false;
         setValue('');
         setExpiredAt('');
+        setShortCode('');
         setMode('long');
         setCopied(false);
         setDragWidth(null);
@@ -94,7 +97,7 @@ export default function UrlForm({ onCreated }) {
         setMode('short');
         announce('Shortening your URL…');
         try {
-            const short = await shortenUrl(original, expiredAt);
+            const short = await shortenUrl(original, expiredAt, shortCode);
             pair.current = { original, short, expiredAt: expirationUtc };
             setValue(short);
             setCopied(false);
@@ -234,6 +237,30 @@ export default function UrlForm({ onCreated }) {
                     </button>
                 </div>
             </div>
+
+            <label htmlFor="short-code">Custom short code (optional)</label>
+            <input
+                type="text"
+                name='short_code'
+                id='short-code'
+                className='short-code-input'
+                value={shortCode}
+                onChange={(event) => {
+                    setShortCode(event.target.value);
+                    announce('');
+                }}
+                pattern="[A-Za-z0-9]{1,32}"
+                maxLength={32}
+                title="Use 1-32 letters or digits"
+                placeholder="e.g. mylink"
+                autoCapitalize="none"
+                spellCheck={false}
+                aria-describedby="short-code-hint url-status"
+                disabled={busy || Boolean(pair.current)}
+            />
+            <p id="short-code-hint" className="url-hint">
+                Leave empty to generate a code automatically.
+            </p>
             <label htmlFor="expired-at">Expiration date and time</label>
             <input
                 className="expiration-input"

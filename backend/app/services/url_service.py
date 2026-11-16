@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.models import Url
-from app.schemas.url import UrlCreate
+from app.schemas.url import RESERVED_SHORT_CODES, UrlCreate
 from app.services import cache_service
 from app.utils.short_code import generate_short_code
 
@@ -17,6 +17,10 @@ MAX_ATTEMPTS = 10
 
 
 class CodeGenerationError(Exception):
+    pass
+
+
+class ShortCodeTaken(Exception):
     pass
 
 
@@ -35,8 +39,13 @@ def _short_code_collision(error: IntegrityError) -> bool:
 
 def create_short_url(db: Session, payload: UrlCreate) -> Url:
     expiration = payload.expires_at or datetime.now(timezone.utc) + timedelta(days=30)
-    for attempt in range(MAX_ATTEMPTS):
-        url = Url(short_code=generate_short_code(settings.short_code_length),
+    custom_code = payload.short_code
+    attempts = 1 if custom_code is not None else MAX_ATTEMPTS
+    for attempt in range(attempts):
+        short_code = custom_code or generate_short_code(settings.short_code_length)
+        if short_code.lower() in RESERVED_SHORT_CODES:
+            continue
+        url = Url(short_code=short_code,
                   original_url=str(payload.original_url),
                   created_at=datetime.now(timezone.utc), expires_at=_as_utc(expiration))
         db.add(url)
@@ -46,7 +55,9 @@ def create_short_url(db: Session, payload: UrlCreate) -> Url:
             db.rollback()
             if not _short_code_collision(error):
                 raise
-            logger.warning("Short code collision (attempt %d/%d)", attempt + 1, MAX_ATTEMPTS)
+            if custom_code is not None:
+                raise ShortCodeTaken() from error
+            logger.warning("Short code collision (attempt %d/%d)", attempt + 1, attempts)
             continue
         db.refresh(url)
         logger.info("[DATABASE] Created %s", url.short_code)

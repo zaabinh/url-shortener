@@ -47,8 +47,13 @@ async function mockApi(page, initialUrls = []) {
         if (method === 'POST' && pathname === '/api/urls') {
             const body = request.postDataJSON();
             requests.creates.push(body);
-            const created = makeUrl(`code${requests.creates.length}`, {
-                short_url: `${new URL(request.url()).origin}/code${requests.creates.length}`,
+            const code = body.short_code || `code${requests.creates.length}`;
+            if (urls.some((item) => item.short_code === code)) {
+                await route.fulfill({ status: 409, json: { detail: 'Short code already exists' } });
+                return;
+            }
+            const created = makeUrl(code, {
+                short_url: `${new URL(request.url()).origin}/${code}`,
                 original_url: body.original_url,
                 expires_at: body.expires_at,
             });

@@ -38,13 +38,13 @@ try {
 # Q at a presentation break must stop before executing the action.
 $ListSteps = $false
 $NonInteractive = $false
-function Read-Host { return 'q' }
+function Read-HostNew { return 'q' }
 try {
     $stopped = $false
     try { Invoke-DemoStep 'Quit before mutation' { throw 'Unexpected action execution' } }
     catch { $stopped = $_.Exception.Message -like 'Demo stopped by presenter*' }
     Assert-Equal $stopped $true 'Q stops before the action'
-} finally { Remove-Item Function:Read-Host }
+} finally { Remove-Item Function:Read-HostNew }
 
 # A shared base/application image must never reach the image-removal command.
 . "$PSScriptRoot/00-reset.ps1" -ListSteps

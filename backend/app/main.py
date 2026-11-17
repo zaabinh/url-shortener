@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.api.urls import router as urls_router
+from app.api.redirect import router as redirect_router
 from app.core.config import settings
 from app.services.url_service import CodeGenerationError
 
@@ -20,6 +21,7 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 app.include_router(urls_router)
+app.include_router(redirect_router)
 
 
 @app.exception_handler(SQLAlchemyError)

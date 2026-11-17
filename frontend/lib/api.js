@@ -6,7 +6,7 @@ export function getShortUrl(shortCode) {
         throw new TypeError('The service returned an invalid short code.');
     }
     const base = API_BASE_URL || window.location.origin;
-    const url = new URL(`${base.replace(/\/$/, '')}/api/urls/${encodeURIComponent(shortCode)}`);
+    const url = new URL(`${base.replace(/\/$/, '')}/${encodeURIComponent(shortCode)}`);
     if (!['http:', 'https:'].includes(url.protocol)) {
         throw new TypeError('The service returned an invalid URL.');
     }
@@ -57,16 +57,23 @@ function getRequestError(action, error) {
 }
 
 // The backend returns the short code; redirect URLs use the same API origin.
-export async function shortenUrl(originalUrl, expirationValue) {
-    const expiredAt = normalizeExpiration(expirationValue);
+export async function shortenUrl(originalUrl, expirationValue, shortCode = '') {
+    const expiresAt = normalizeExpiration(expirationValue);
     const headers = { 'Content-Type': 'application/json' };
+    const payload = {
+        original_url: originalUrl,
+        expires_at: expiresAt,
+    };
+
+    const customCode = shortCode.trim();
+    if (customCode) payload.short_code = customCode;
 
     let response;
     try {
         response = await fetch(`${API_BASE_URL}/api/urls`, {
             method: 'POST',
             headers,
-            body: JSON.stringify({ original_url: originalUrl, expires_at: expiredAt }),
+            body: JSON.stringify(payload),
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
     } catch (error) {
@@ -87,7 +94,7 @@ export async function shortenUrl(originalUrl, expirationValue) {
     return getShortUrl(data?.short_code);
 }
 
-export async function listUrls({ limit = 20, offset = 0 } = {}) {
+export async function listUrls({ limit = 32, offset = 0 } = {}) {
 
     let response;
     try {

@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-empty/
 venv/
 .pytest_cache/
 *.db
@@ -23,3 +24,4 @@ out/
 next-env.d.ts
 frontend/playwright-report/
 frontend/test-results/
+seminar-backup.sql

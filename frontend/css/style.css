@@ -236,6 +236,17 @@ body::after {
     min-width: 0;
 }
 
+.url-measure {
+    position: fixed;
+    right: 100%;
+    top: 0;
+    visibility: hidden;
+    pointer-events: none;
+    white-space: pre;
+    width: max-content;
+    font: inherit;
+}
+
 .url-control {
     --compact-width: max(65%, min(100%, 13rem));
     position: relative;
@@ -719,10 +730,6 @@ html {
     cursor: wait;
 }
 
-.hero .url-control {
-    --compact-width: 92%;
-}
-
 .recent-url-actions {
     display: flex;
     align-items: center;
@@ -784,6 +791,17 @@ html {
 
 .back-to-top:hover {
     background: var(--accent-hover);
+}
+
+.short-code-input {
+    width: 100%;
+    min-width: 0;
+    padding: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 0.75rem;
+    background: var(--paper);
+    color: var(--ink);
+    font: inherit;
 }
 
 @media (max-width: 760px) {

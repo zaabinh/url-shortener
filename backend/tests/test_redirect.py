@@ -20,7 +20,7 @@ def test_public_redirect_increments_clicks(client, db, aware):
         expiry = expiry.replace(tzinfo=None)
     add_url(db, expires=expiry)
     client.headers.clear()
-    response = client.get("/api/urls/redirect", follow_redirects=False)
+    response = client.get("/redirect", follow_redirects=False)
     assert response.status_code == 302
     assert response.headers["location"] == "https://example.com/destination"
     assert response.headers["cache-control"] == "no-store"
@@ -29,12 +29,12 @@ def test_public_redirect_increments_clicks(client, db, aware):
 
 def test_expired_redirect_never_increments(client, db):
     add_url(db, expires=datetime.now(timezone.utc)-timedelta(seconds=1))
-    assert client.get("/api/urls/redirect", follow_redirects=False).status_code == 410
+    assert client.get("/redirect", follow_redirects=False).status_code == 410
     assert db.scalar(select(Url.click_count)) == 0
 
 
 def test_missing_redirect(client):
-    assert client.get("/api/urls/missing", follow_redirects=False).status_code == 404
+    assert client.get("/missing", follow_redirects=False).status_code == 404
 
 
 def test_delete_between_lookup_and_update_does_not_redirect(client, db):
@@ -48,7 +48,7 @@ def test_delete_between_lookup_and_update_does_not_redirect(client, db):
             connection.exec_driver_sql("DELETE FROM urls WHERE short_code = 'redirect'")
     event.listen(engine, "before_cursor_execute", delete_before_update)
     try:
-        assert client.get("/api/urls/redirect", follow_redirects=False).status_code == 404
+        assert client.get("/redirect", follow_redirects=False).status_code == 404
         assert removed
     finally:
         event.remove(engine, "before_cursor_execute", delete_before_update)
@@ -57,5 +57,5 @@ def test_delete_between_lookup_and_update_does_not_redirect(client, db):
 def test_many_redirects_have_exact_click_count(client, db):
     add_url(db)
     for _ in range(12):
-        assert client.get("/api/urls/redirect", follow_redirects=False).status_code == 302
+        assert client.get("/redirect", follow_redirects=False).status_code == 302
     assert db.scalar(select(Url.click_count)) == 12
